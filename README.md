@@ -9,14 +9,15 @@ This repository contains the backend API for the **Blockchain Vulnerability Data
 
 ```plaintext
 BVD-Backend/
-├── controllers/               # Controllers for handling business logic
-├── routes/                    # API routes for handling requests
-├── server.js                  # Main backend server file
-├── .env                       # Environment variables (private keys, IPFS API keys)
-├── node_modules/              # Node.js dependencies
-├── package.json               # Project metadata and dependencies
-├── .gitignore                 # Git ignore file
-├── BVCRegistryABI.json        # ABI for the BVCRegistry smart contract
+├── backend/                   # All server-side code (can be named `backend`)
+│   ├── controllers/           # Controllers for handling business logic
+│   ├── routes/                # API routes for handling requests
+│   ├── server.js              # Main backend server file
+│   ├── .env                   # Environment variables (private keys, IPFS API keys)
+│   ├── node_modules/          # Node.js dependencies
+│   ├── package.json           # Project metadata and dependencies
+│   ├── BVCRegistryABI.json    # ABI for the BVCRegistry smart contract
+│   └── .gitignore             # Git ignore file
 └── README.md                  # This file
 ```
 
