@@ -107,16 +107,24 @@ app.use(
 app.get('/status', async (req, res) => {
   try {
     const isListening = await web3.eth.net.isListening();
-    const networkType = await web3.eth.net.getNetworkType();
+
+    // web3.eth.net.getId() can return a BigInt in some versions of Web3.js
+    const networkId = await web3.eth.net.getId(); 
     const blockNumber = await web3.eth.getBlockNumber();
 
-    logger.info(`Status check successful: Listening=${isListening}, Network=${networkType}, Block=${blockNumber}`);
+    // Convert BigInt to string (or number) to avoid "Do not know how to serialize a BigInt" errors
+    const networkIdStr = networkId.toString();
+    const blockNumberStr = blockNumber.toString();
+
+    logger.info(
+      `Status check successful: Listening=${isListening}, NetworkID=${networkIdStr}, Block=${blockNumberStr}`
+    );
 
     res.json({
       status: 'success',
       isListening,
-      networkType,
-      blockNumber
+      networkId: networkIdStr,
+      blockNumber: blockNumberStr
     });
   } catch (error) {
     logger.error('Error during status check:', error.message);
