@@ -60,6 +60,8 @@ BVD-Backend/
 - **Express**: `v4.21.2`
 - **express-validator**: `v7.2.1`
 - **express-winston**: `v4.2.0`
+- **Winston**:`v3.17.0`
+
 
 ---
 
