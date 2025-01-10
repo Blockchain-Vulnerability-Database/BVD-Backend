@@ -58,7 +58,10 @@ BVD-Backend/
 - **npm**: `v10.8.2`
 - **Web3.js**: `v4.16.0`
 - **Express**: `v4.21.2`
+- **express-validator**: `v7.2.1`
+- **express-winston**: `v4.2.0`
 - **Winston**:`v3.17.0`
+
 
 ---
 

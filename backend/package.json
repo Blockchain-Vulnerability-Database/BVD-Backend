@@ -13,6 +13,9 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "web3": "^4.16.0"
+    "express-validator": "^7.2.1",
+    "express-winston": "^4.2.0",
+    "web3": "^4.16.0",
+    "winston": "^3.17.0"
   }
 }
