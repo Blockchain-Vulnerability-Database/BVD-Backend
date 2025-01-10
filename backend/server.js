@@ -3,6 +3,21 @@ require('dotenv').config();
 
 // Import Web3 (adjusted for web3@4.x)
 const { Web3 } = require('web3');
+const winston = require('winston');
+
+// Set up Winston logger
+const logger = winston.createLogger({
+  level: 'info', // The default logging level
+  format: winston.format.combine(
+    winston.format.colorize(), // Colorize logs in the console
+    winston.format.timestamp(), // Add a timestamp to logs
+    winston.format.simple() // Simplified log format
+  ),
+  transports: [
+    new winston.transports.Console(), // Log to console
+    new winston.transports.File({ filename: 'logs/app.log' }) // Log to file
+  ]
+});
 
 // Validate and initialize the RPC URL
 const requiredEnvVars = [
@@ -21,8 +36,8 @@ requiredEnvVars.forEach((envVar) => {
 });
 
 if (missingEnvVars.length > 0) {
-    console.error("Error: Missing environment variables.");
-    console.error("Missing variables:", missingEnvVars.join(', '));
+    logger.error("Missing environment variables.");
+    logger.error("Missing variables:", missingEnvVars.join(', '));
     process.exit(1); // Exit if any critical environment variable is missing
 }
 
@@ -31,9 +46,9 @@ let web3;
 try {
     const rpcUrl = process.env.POLYGON_AMOY_RPC_URL;
     web3 = new Web3(rpcUrl);
-    console.log("Web3 initialized successfully.");
+    logger.info("Web3 initialized successfully.");
 } catch (error) {
-    console.error("Error initializing Web3:", error.message);
+    logger.error("Error initializing Web3:", error.message);
     process.exit(1); // Exit on initialization error
 }
 
@@ -52,6 +67,8 @@ app.get('/status', async (req, res) => {
         const networkType = await web3.eth.net.getNetworkType();
         const blockNumber = await web3.eth.getBlockNumber();
 
+        logger.info(`Status check successful: Listening=${isListening}, Network=${networkType}, Block=${blockNumber}`);
+
         res.json({
             status: 'success',
             isListening,
@@ -59,6 +76,7 @@ app.get('/status', async (req, res) => {
             blockNumber
         });
     } catch (error) {
+        logger.error("Error during status check:", error.message);
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
@@ -69,13 +87,16 @@ app.post('/addVulnerability', async (req, res) => {
 
     try {
         if (!id || !title || !description || !metadata) {
+            logger.warn("Missing required fields in request:", { id, title, description });
             return res.status(400).json({ error: "Missing required fields." });
         }
 
-        // Step 1: Upload metadata to IPFS
+        logger.info("Uploading metadata to IPFS...");
         const cid = await uploadToIPFS(metadata);
 
-        // Step 2: Add vulnerability data to the contract
+        logger.info(`Metadata uploaded successfully. CID: ${cid}`);
+
+        // Continue with smart contract interaction
         const account = web3.eth.accounts.privateKeyToAccount(process.env.PRIVATE_KEY);
         const data = contract.methods.addVulnerability(id, title, description, cid).encodeABI();
 
@@ -89,9 +110,11 @@ app.post('/addVulnerability', async (req, res) => {
         const signedTx = await web3.eth.accounts.signTransaction(tx, process.env.PRIVATE_KEY);
         const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
 
+        logger.info("Transaction receipt:", receipt);
+
         res.json({ message: 'Vulnerability added successfully', receipt });
     } catch (error) {
-        console.error('Error adding vulnerability:', error);
+        logger.error('Error adding vulnerability:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -102,18 +125,20 @@ app.get('/getVulnerability/:id', async (req, res) => {
 
     try {
         if (!id) {
+            logger.warn("Missing vulnerability ID.");
             return res.status(400).json({ error: "Missing vulnerability ID." });
         }
 
         const vulnerability = await contract.methods.getVulnerability(id).call();
 
         if (!vulnerability) {
+            logger.warn("Vulnerability not found:", id);
             return res.status(404).json({ error: "Vulnerability not found." });
         }
 
         res.json(vulnerability);
     } catch (error) {
-        console.error('Error fetching vulnerability:', error);
+        logger.error('Error fetching vulnerability:', error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -141,5 +166,5 @@ const PORT = process.env.PORT || 3000;
 
 // Start the server
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    logger.info(`Server running on http://localhost:${PORT}`);
 });
