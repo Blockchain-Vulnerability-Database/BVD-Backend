@@ -9,15 +9,14 @@ This repository contains the backend API for the **Blockchain Vulnerability Data
 
 ```plaintext
 BVD-Backend/
-├── backend/                   # All server-side code (can be named `backend`)
-│   ├── controllers/           # Controllers for handling business logic
-│   ├── routes/                # API routes for handling requests
-│   ├── server.js              # Main backend server file
-│   ├── .env                   # Environment variables (private keys, IPFS API keys)
-│   ├── node_modules/          # Node.js dependencies
-│   ├── package.json           # Project metadata and dependencies
-│   ├── BVCRegistryABI.json    # ABI for the BVCRegistry smart contract
-│   └── .gitignore             # Git ignore file
+├── controllers/               # Controllers for handling business logic
+├── routes/                    # API routes for handling requests
+├── server.js                  # Main backend server file
+├── .env                       # Environment variables (private keys, IPFS API keys)
+├── node_modules/              # Node.js dependencies
+├── package.json               # Project metadata and dependencies
+├── .gitignore                 # Git ignore file
+├── BVCRegistryABI.json        # ABI for the BVCRegistry smart contract
 └── README.md                  # This file
 ```
 
@@ -45,6 +44,20 @@ BVD-Backend/
    PINATA_API_KEY=YOUR_PINATA_API_KEY
    PINATA_SECRET_KEY=YOUR_PINATA_SECRET_KEY
    ```
+
+4. **Start the Backend Server**:
+   ```bash
+   node server.js
+   ```
+
+---
+
+## **Technologies Used**
+
+- **Node.js**: `v18.20.5`
+- **npm**: `v10.8.2`
+- **Web3.js**: `v4.16.0`
+- **Express**: `v4.21.2`
 
 ---
 
