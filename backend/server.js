@@ -129,9 +129,22 @@ app.post(
 
     try {
       const { id, title, description, metadata } = req.body;
-      const parsedMetadata = JSON.parse(metadata);
-      const cid = await uploadToIPFS(parsedMetadata);
 
+      // Validate file existence
+      if (!fs.existsSync(metadata)) {
+        throw new Error(`Metadata file not found at path: ${metadata}`);
+      }
+
+      // Read and parse file content
+      const fileContent = fs.readFileSync(metadata, 'utf-8');
+      const parsedMetadata = JSON.parse(fileContent);
+      logger.info('Metadata file read and parsed successfully.');
+
+      // Upload to IPFS
+      const cid = await uploadToIPFS(metadata);
+      logger.info(`Metadata uploaded to IPFS. CID: ${cid}`);
+
+      // Interact with the smart contract
       const tx = await contract.addVulnerability(id, title, description, cid);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
@@ -148,10 +161,10 @@ app.post(
 // ───────────────────────────────────────────────────────────────────────────────
 // Upload to IPFS
 // ───────────────────────────────────────────────────────────────────────────────
-async function uploadToIPFS(jsonData) {
+async function uploadToIPFS(filePath) {
   const formData = new FormData();
-  formData.append('file', Buffer.from(JSON.stringify(jsonData)), { filename: 'metadata.json' });
-  formData.append('pinataMetadata', JSON.stringify({ name: 'metadata.json' }));
+  formData.append('file', fs.createReadStream(filePath));
+  formData.append('pinataMetadata', JSON.stringify({ name: filePath.split('/').pop() }));
   formData.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
 
   try {
