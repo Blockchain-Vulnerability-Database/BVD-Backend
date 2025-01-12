@@ -107,6 +107,8 @@ app.use(
 // ───────────────────────────────────────────────────────────────────────────────
 // Routes
 // ───────────────────────────────────────────────────────────────────────────────
+
+// Status Route
 app.get('/status', async (req, res) => {
   try {
     const blockNumber = await provider.getBlockNumber();
@@ -118,6 +120,7 @@ app.get('/status', async (req, res) => {
   }
 });
 
+// Add Vulnerability Route
 app.post(
   '/addVulnerability',
   [
@@ -158,6 +161,39 @@ app.post(
       res.json({ message: 'Vulnerability added successfully', receipt });
     } catch (error) {
       console.error('Error adding vulnerability:', error.message);
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  }
+);
+
+// Get Vulnerability Route
+app.get(
+  '/getVulnerability/:id',
+  async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      // Interact with the smart contract to fetch the vulnerability
+      const vulnerability = await contract.getVulnerability(id);
+
+      // Check if the returned vulnerability is empty or invalid
+      if (!vulnerability || vulnerability.id === '') {
+        console.warn(`No vulnerability found for ID: ${id}`);
+        return res.status(404).json({ status: 'error', message: 'Vulnerability not found.' });
+      }
+
+      // Construct response
+      const response = {
+        id: vulnerability.id,
+        title: vulnerability.title,
+        description: vulnerability.description,
+        metadataCID: vulnerability.metadataCID,
+      };
+
+      console.log(`Vulnerability retrieved successfully: ${JSON.stringify(response)}`);
+      res.json({ status: 'success', vulnerability: response });
+    } catch (error) {
+      console.error(`Error fetching vulnerability with ID ${id}:`, error.message);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
