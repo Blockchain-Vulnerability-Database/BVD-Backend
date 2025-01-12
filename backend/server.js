@@ -8,6 +8,7 @@ const expressWinston = require('express-winston');
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
+const crypto = require('crypto'); // For SHA-256 hashing
 const { body, validationResult } = require('express-validator');
 const { abi } = require('./BVCRegistryABI.json'); // Adjust path if needed
 
@@ -98,6 +99,9 @@ app.use(
   })
 );
 
+// Mock database for CIDs (replace with a real DB in production)
+const mockDatabase = new Set(); // Store CIDs
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Routes
 // ───────────────────────────────────────────────────────────────────────────────
@@ -130,21 +134,36 @@ app.post(
     try {
       const { id, title, description, metadata } = req.body;
 
-      // Validate file existence
+      // Check if the metadata file exists
       if (!fs.existsSync(metadata)) {
-        throw new Error(`Metadata file not found at path: ${metadata}`);
+        throw new Error(`Metadata file not found: ${metadata}`);
       }
 
-      // Read and parse file content
-      const fileContent = fs.readFileSync(metadata, 'utf-8');
-      const parsedMetadata = JSON.parse(fileContent);
-      logger.info('Metadata file read and parsed successfully.');
+      // Calculate file hash
+      const fileBuffer = fs.readFileSync(metadata);
+      const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+      logger.info(`File hash calculated: ${fileHash}`);
+
+      // Check if the hash already exists in IPFS
+      if (mockDatabase.has(fileHash)) {
+        logger.warn('Vulnerability already exists in IPFS.');
+        return res.status(409).json({ error: 'Vulnerability already exists in IPFS.' });
+      }
 
       // Upload to IPFS
-      const cid = await uploadToIPFS(metadata);
-      logger.info(`Metadata uploaded to IPFS. CID: ${cid}`);
+      const cid = await uploadToIPFS(fileBuffer);
 
-      // Interact with the smart contract
+      // Add the CID to the mock database
+      mockDatabase.add(fileHash);
+
+      // Check if the vulnerability ID already exists in the blockchain
+      const existingVulnerability = await contract.getVulnerability(id);
+      if (existingVulnerability.id === id) {
+        logger.warn('Vulnerability already exists on the blockchain.');
+        return res.status(409).json({ error: 'Vulnerability already exists on the blockchain.' });
+      }
+
+      // Submit the vulnerability to the blockchain
       const tx = await contract.addVulnerability(id, title, description, cid);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
@@ -161,10 +180,10 @@ app.post(
 // ───────────────────────────────────────────────────────────────────────────────
 // Upload to IPFS
 // ───────────────────────────────────────────────────────────────────────────────
-async function uploadToIPFS(filePath) {
+async function uploadToIPFS(fileBuffer) {
   const formData = new FormData();
-  formData.append('file', fs.createReadStream(filePath));
-  formData.append('pinataMetadata', JSON.stringify({ name: filePath.split('/').pop() }));
+  formData.append('file', fileBuffer, { filename: 'metadata.json' });
+  formData.append('pinataMetadata', JSON.stringify({ name: 'metadata.json' }));
   formData.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
 
   try {
