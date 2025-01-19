@@ -9,7 +9,7 @@ const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
 const crypto = require('crypto'); // For SHA-256 hashing
-const { body, validationResult } = require('express-validator');
+const { body, validationResult, query } = require('express-validator');
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Logger Setup
@@ -196,6 +196,71 @@ app.post(
       res.json({ message: 'Vulnerability added successfully', receipt });
     } catch (error) {
       logger.error('Error adding vulnerability:', error.message);
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  }
+);
+
+// Get All Vulnerabilities Route
+app.get('/getAllVulnerabilities', async (req, res) => {
+  try {
+    const ids = await contract.getAllVulnerabilityIds();
+    logger.info(`Fetched ${ids.length} vulnerabilities`);
+
+    const vulnerabilities = [];
+    for (const id of ids) {
+      const vuln = await contract.getVulnerability(id);
+      vulnerabilities.push({
+        id: ethers.utils.hexlify(id),
+        title: vuln.title,
+        description: vuln.description,
+        ipfsCid: vuln.ipfsCid,
+        isActive: vuln.isActive
+      });
+    }
+
+    res.json({ status: 'success', vulnerabilities });
+  } catch (error) {
+    logger.error('Error fetching all vulnerabilities:', error.message);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// Get Paginated Vulnerabilities Route
+app.get(
+  '/getVulnerabilitiesPaginated',
+  [
+    query('page').isInt({ gt: 0 }).withMessage('Page must be a positive integer'),
+    query('pageSize').isInt({ gt: 0 }).withMessage('Page size must be a positive integer')
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('Validation failed:', errors.array());
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { page, pageSize } = req.query;
+
+    try {
+      const ids = await contract.getPaginatedVulnerabilityIds(page, pageSize);
+      logger.info(`Fetched ${ids.length} vulnerabilities for page ${page} with size ${pageSize}`);
+
+      const vulnerabilities = [];
+      for (const id of ids) {
+        const vuln = await contract.getVulnerability(id);
+        vulnerabilities.push({
+          id: ethers.utils.hexlify(id),
+          title: vuln.title,
+          description: vuln.description,
+          ipfsCid: vuln.ipfsCid,
+          isActive: vuln.isActive
+        });
+      }
+
+      res.json({ status: 'success', vulnerabilities });
+    } catch (error) {
+      logger.error('Error fetching paginated vulnerabilities:', error.message);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
