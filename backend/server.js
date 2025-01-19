@@ -2,13 +2,13 @@
 require('dotenv').config();
 
 const fs = require('fs');
-const { ethers } = require('ethers'); // Use ethers.js for account and transaction handling
+const { ethers } = require('ethers');
 const winston = require('winston');
 const expressWinston = require('express-winston');
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
-const crypto = require('crypto'); // For SHA-256 hashing
+const crypto = require('crypto');
 const { body, validationResult, query } = require('express-validator');
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -19,13 +19,15 @@ const logger = winston.createLogger({
   format: winston.format.combine(
     winston.format.colorize(),
     winston.format.timestamp(),
-    winston.format.simple()
+    winston.format.printf(({ level, message, timestamp }) => `${timestamp} [${level}]: ${message}`)
   ),
   transports: [
     new winston.transports.Console(),
     new winston.transports.File({ filename: 'logs/app.log' })
-  ]
+  ],
 });
+
+module.exports = logger; // Export logger for use throughout your application
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Load ABI from Environment Variable
@@ -82,7 +84,6 @@ try {
   const privateKey = process.env.PRIVATE_KEY.trim();
   logger.info(`Using PRIVATE_KEY (masked): ${privateKey.slice(0, 6)}...${privateKey.slice(-4)}`);
 
-  // Validate private key format
   if (!/^([a-fA-F0-9]{64})$/.test(privateKey)) {
     throw new Error('Invalid private key format. Must be a 64-character hexadecimal string.');
   }
@@ -128,7 +129,7 @@ app.use(
 );
 
 // Mock database for CIDs (replace with a real DB in production)
-const mockDatabase = new Set(); // Store CIDs
+const mockDatabase = new Set();
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Routes
@@ -165,51 +166,65 @@ app.post(
     try {
       const { id, title, description, metadata } = req.body;
 
-      // Check if the metadata file exists
+      // Debug log for ID
+      logger.info(`Processing ID: ${id}`);
+
+      // Convert id to bytes32 using ethers or a fallback
+      let idBytes32;
+      try {
+        idBytes32 = ethers.utils.formatBytes32String(id);
+      } catch (error) {
+        logger.warn('Ethers formatBytes32String failed, using fallback conversion.');
+        if (id.length > 32) {
+          throw new Error('ID must be 32 bytes or shorter.');
+        }
+        const buffer = Buffer.alloc(32);
+        buffer.write(id);
+        idBytes32 = `0x${buffer.toString('hex')}`;
+      }
+
+      logger.info(`Converted ID to bytes32: ${idBytes32}`);
+
+      // Validate metadata file
       if (!fs.existsSync(metadata)) {
         throw new Error(`Metadata file not found: ${metadata}`);
       }
 
-      // Calculate file hash
       const fileBuffer = fs.readFileSync(metadata);
       const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
       logger.info(`File hash calculated: ${fileHash}`);
 
-      // Check if the hash already exists in IPFS
       if (mockDatabase.has(fileHash)) {
         logger.warn('Vulnerability already exists in IPFS.');
         return res.status(409).json({ error: 'Vulnerability already exists in IPFS.' });
       }
 
-      // Upload to IPFS
-      const cid = await uploadToIPFS(fileBuffer);
+      const cid = await uploadToIPFS(fileBuffer, `${id}.json`);
+      logger.info(`Uploaded metadata to IPFS. CID: ${cid}`);
 
-      // Add the CID to the mock database
       mockDatabase.add(fileHash);
 
-      // Submit the vulnerability to the blockchain
-      const tx = await contract.addVulnerability(id, title, description, cid);
+      const tx = await contract.addVulnerability(idBytes32, title, description, cid);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
       const receipt = await tx.wait();
       logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
       res.json({ message: 'Vulnerability added successfully', receipt });
     } catch (error) {
-      logger.error('Error adding vulnerability:', error.message);
+      logger.error(`Error adding vulnerability: ${error.message}`);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
 );
 
-// Get Vuln by ID
+// Get Vulnerability by ID
 app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Fetch vulnerability details from the contract
-    const vulnerability = await contract.getVulnerability(id);
+    const idBytes32 = ethers.utils.formatBytes32String(id);
+    const vulnerability = await contract.getVulnerability(idBytes32);
 
-    // Check if the returned vulnerability is valid
     if (!vulnerability.id || vulnerability.id === ethers.constants.HashZero) {
       return res.status(404).json({ status: 'error', message: 'Vulnerability not found' });
     }
@@ -217,12 +232,12 @@ app.get('/getVulnerability/:id', async (req, res) => {
     res.json({
       status: 'success',
       vulnerability: {
-        id: ethers.utils.hexlify(vulnerability.id),
+        id,
         title: vulnerability.title,
         description: vulnerability.description,
         ipfsCid: vulnerability.ipfsCid,
-        isActive: vulnerability.isActive,
-      },
+        isActive: vulnerability.isActive
+      }
     });
   } catch (error) {
     logger.error(`Error fetching vulnerability: ${error.message}`);
@@ -230,12 +245,12 @@ app.get('/getVulnerability/:id', async (req, res) => {
   }
 });
 
-// setVulnerabilityStatus
+// Set Vulnerability Status
 app.post(
   '/setVulnerabilityStatus',
   [
     body('id').isString().notEmpty().withMessage('id is required and must be a string'),
-    body('isActive').isBoolean().withMessage('isActive must be a boolean value'),
+    body('isActive').isBoolean().withMessage('isActive must be a boolean value')
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -246,9 +261,9 @@ app.post(
 
     try {
       const { id, isActive } = req.body;
+      const idBytes32 = ethers.utils.formatBytes32String(id);
 
-      // Call setVulnerabilityStatus on the contract
-      const tx = await contract.setVulnerabilityStatus(id, isActive);
+      const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
       const receipt = await tx.wait();
@@ -272,7 +287,7 @@ app.get('/getAllVulnerabilities', async (req, res) => {
     for (const id of ids) {
       const vuln = await contract.getVulnerability(id);
       vulnerabilities.push({
-        id: ethers.utils.hexlify(id),
+        id: ethers.utils.parseBytes32String(id),
         title: vuln.title,
         description: vuln.description,
         ipfsCid: vuln.ipfsCid,
@@ -311,7 +326,7 @@ app.get(
       for (const id of ids) {
         const vuln = await contract.getVulnerability(id);
         vulnerabilities.push({
-          id: ethers.utils.hexlify(id),
+          id: ethers.utils.parseBytes32String(id),
           title: vuln.title,
           description: vuln.description,
           ipfsCid: vuln.ipfsCid,
@@ -330,10 +345,10 @@ app.get(
 // ───────────────────────────────────────────────────────────────────────────────
 // Upload to IPFS
 // ───────────────────────────────────────────────────────────────────────────────
-async function uploadToIPFS(fileBuffer) {
+async function uploadToIPFS(fileBuffer, filename) {
   const formData = new FormData();
-  formData.append('file', fileBuffer, { filename: 'metadata.json' });
-  formData.append('pinataMetadata', JSON.stringify({ name: 'metadata.json' }));
+  formData.append('file', fileBuffer, { filename });
+  formData.append('pinataMetadata', JSON.stringify({ name: filename }));
   formData.append('pinataOptions', JSON.stringify({ cidVersion: 1 }));
 
   try {
