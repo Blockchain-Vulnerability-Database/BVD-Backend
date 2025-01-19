@@ -201,6 +201,67 @@ app.post(
   }
 );
 
+// Get Vuln by ID
+app.get('/getVulnerability/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Fetch vulnerability details from the contract
+    const vulnerability = await contract.getVulnerability(id);
+
+    // Check if the returned vulnerability is valid
+    if (!vulnerability.id || vulnerability.id === ethers.constants.HashZero) {
+      return res.status(404).json({ status: 'error', message: 'Vulnerability not found' });
+    }
+
+    res.json({
+      status: 'success',
+      vulnerability: {
+        id: ethers.utils.hexlify(vulnerability.id),
+        title: vulnerability.title,
+        description: vulnerability.description,
+        ipfsCid: vulnerability.ipfsCid,
+        isActive: vulnerability.isActive,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error fetching vulnerability: ${error.message}`);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// setVulnerabilityStatus
+app.post(
+  '/setVulnerabilityStatus',
+  [
+    body('id').isString().notEmpty().withMessage('id is required and must be a string'),
+    body('isActive').isBoolean().withMessage('isActive must be a boolean value'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('Validation failed:', errors.array());
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      const { id, isActive } = req.body;
+
+      // Call setVulnerabilityStatus on the contract
+      const tx = await contract.setVulnerabilityStatus(id, isActive);
+      logger.info(`Transaction submitted. Hash: ${tx.hash}`);
+
+      const receipt = await tx.wait();
+      logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
+
+      res.json({ message: 'Vulnerability status updated successfully', receipt });
+    } catch (error) {
+      logger.error(`Error updating vulnerability status: ${error.message}`);
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  }
+);
+
 // Get All Vulnerabilities Route
 app.get('/getAllVulnerabilities', async (req, res) => {
   try {
