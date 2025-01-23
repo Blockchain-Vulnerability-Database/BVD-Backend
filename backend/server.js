@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 const fs = require('fs');
-const { ethers } = require('ethers');
+const { ethers, ZeroHash, toUtf8String } = require('ethers');
 const winston = require('winston');
 const expressWinston = require('express-winston');
 const express = require('express');
@@ -93,6 +93,25 @@ try {
 } catch (error) {
   logger.error('Error initializing Ethers.js:', error.message);
   process.exit(1);
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// `parseBytes32String` Helper
+// ───────────────────────────────────────────────────────────────────────────────
+
+/** 
+ * parseBytes32String - Replicates the old v5 behavior:
+ *   - Convert 0x-hex to bytes
+ *   - Trim trailing null (\x00) bytes
+ *   - Return the UTF-8 decoded string
+ */
+function parseBytes32String(bytes32Data) {
+  const bytes = ethers.getBytes(bytes32Data);
+  let length = bytes.length;
+  while (length > 0 && bytes[length - 1] === 0) {
+    length--;
+  }
+  return toUtf8String(bytes.slice(0, length));
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -218,26 +237,46 @@ app.post(
 );
 
 // Get Vulnerability by ID
+// Get Vulnerability by ID
 app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const idBytes32 = ethers.utils.formatBytes32String(id);
+    logger.info(`Processing ID: ${id}`);
+
+    // Convert ID to bytes32
+    let idBytes32;
+    try {
+      idBytes32 = ethers.utils.formatBytes32String(id);
+      logger.info(`Converted ID to bytes32 using formatBytes32String: ${idBytes32}`);
+    } catch (error) {
+      logger.warn(`formatBytes32String failed for ID: ${id}.`);
+      if (id.length > 32) {
+        throw new Error('ID length exceeds 32 bytes');
+      }
+      const buffer = Buffer.alloc(32, 0); // Create a 32-byte buffer
+      buffer.write(id, 'utf8'); // Write the string into the buffer
+      idBytes32 = `0x${buffer.toString('hex')}`; // Convert buffer to hex
+      logger.info(`Manually converted ID to bytes32: ${idBytes32}`);
+    }
+
+    // Fetch vulnerability details from the contract
     const vulnerability = await contract.getVulnerability(idBytes32);
 
-    if (!vulnerability.id || vulnerability.id === ethers.constants.HashZero) {
+    // Check if the returned vulnerability is valid
+    if (!vulnerability.id || vulnerability.id === ZeroHash) {
       return res.status(404).json({ status: 'error', message: 'Vulnerability not found' });
     }
 
     res.json({
       status: 'success',
       vulnerability: {
-        id,
+        id: parseBytes32String(vulnerability.id),
         title: vulnerability.title,
         description: vulnerability.description,
         ipfsCid: vulnerability.ipfsCid,
-        isActive: vulnerability.isActive
-      }
+        isActive: vulnerability.isActive,
+      },
     });
   } catch (error) {
     logger.error(`Error fetching vulnerability: ${error.message}`);
@@ -287,7 +326,7 @@ app.get('/getAllVulnerabilities', async (req, res) => {
     for (const id of ids) {
       const vuln = await contract.getVulnerability(id);
       vulnerabilities.push({
-        id: ethers.utils.parseBytes32String(id),
+        id: parseBytes32String(id),
         title: vuln.title,
         description: vuln.description,
         ipfsCid: vuln.ipfsCid,
@@ -326,7 +365,7 @@ app.get(
       for (const id of ids) {
         const vuln = await contract.getVulnerability(id);
         vulnerabilities.push({
-          id: ethers.utils.parseBytes32String(id),
+          id: parseBytes32String(id),
           title: vuln.title,
           description: vuln.description,
           ipfsCid: vuln.ipfsCid,
