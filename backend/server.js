@@ -382,7 +382,7 @@ app.get(
 );
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Upload to IPFS
+// IPFS Functions
 // ───────────────────────────────────────────────────────────────────────────────
 async function uploadToIPFS(fileBuffer, filename) {
   const formData = new FormData();
@@ -408,6 +408,100 @@ async function uploadToIPFS(fileBuffer, filename) {
   } catch (error) {
     logger.error('Error uploading to IPFS:', error.message);
     throw new Error('Error uploading to IPFS');
+  }
+}
+
+// Delete File from IPFS If Not in Contract
+app.delete('/deleteFileFromIPFSIfUnreferenced/:cid', async (req, res) => {
+  const { cid } = req.params;
+
+  try {
+    const allIds = await contract.getAllVulnerabilityIds();
+
+    const cidsInUse = new Set();
+    for (const idBytes32 of allIds) {
+      const vuln = await contract.getVulnerability(idBytes32);
+      if (vuln.ipfsCid) {
+        cidsInUse.add(vuln.ipfsCid);
+      }
+    }
+
+    if (!cidsInUse.has(cid)) {
+      await unpinFromIPFS(cid);
+      return res.json({
+        status: 'success',
+        message: `CID ${cid} was not in the contract and has been unpinned.`,
+      });
+    } else {
+      return res.status(400).json({
+        status: 'error',
+        message: `CID ${cid} is still referenced in the contract.`,
+      });
+    }
+  } catch (error) {
+    logger.error(`Error deleting from IPFS: ${error.message}`);
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// GET /getHashAndCid/:id
+app.get('/getHashAndCid/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    let idBytes32;
+    try {
+      idBytes32 = ethers.utils.formatBytes32String(id);
+    } catch (error) {
+      const buffer = Buffer.alloc(32, 0);
+      buffer.write(id);
+      idBytes32 = '0x' + buffer.toString('hex');
+    }
+    const vulnerability = await contract.getVulnerability(idBytes32);
+    if (!vulnerability.id || vulnerability.id === ZeroHash) {
+      return res.status(404).json({ status: 'error', message: `Vulnerability ${id} not found` });
+    }
+    const cid = vulnerability.ipfsCid;
+    if (!cid) {
+      return res.status(404).json({ status: 'error', message: `No CID found for ID ${id}` });
+    }
+
+    const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
+    const fileResponse = await axios.get(gatewayUrl, { responseType: 'arraybuffer' });
+
+    const fileBuffer = Buffer.from(fileResponse.data);
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    return res.json({
+      status: 'success',
+      data: {
+        id,
+        cid,
+        fileHash,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error fetching IPFS file for ID=${id}: ${error.message}`);
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// Unpin from IPFS Helper
+async function unpinFromIPFS(cid) {
+  try {
+    const response = await axios.delete(
+      `https://api.pinata.cloud/pinning/unpin/${cid}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PINATA_JWT}`,
+        },
+      }
+    );
+    logger.info(`Unpinned ${cid} from Pinata successfully.`);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error unpinning CID ${cid}: ${error.message}`);
+    throw error;
   }
 }
 
