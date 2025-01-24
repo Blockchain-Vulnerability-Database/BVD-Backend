@@ -167,6 +167,7 @@ app.get('/status', async (req, res) => {
 });
 
 // Add Vulnerability Route
+// Add Vulnerability Route
 app.post(
   '/addVulnerability',
   [
@@ -198,14 +199,16 @@ app.post(
         });
       }
 
-      // Convert id to bytes32
+      // Convert id to bytes32 using Ethers.js v6
       let idBytes32;
       try {
-        idBytes32 = ethers.zeroPadValue(ethers.toUtf8Bytes(id), 32);
+        idBytes32 = ethers.encodeBytes32String(id);
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
-        return res.status(400).json({ error: 'Invalid ID format. Must be UTF-8 and <= 32 bytes.' });
+        return res.status(400).json({
+          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.'
+        });
       }
 
       // Validate metadata file
@@ -278,6 +281,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
 });
 
 // Set Vulnerability Status
+// Set Vulnerability Status Route
 app.post(
   '/setVulnerabilityStatus',
   [
@@ -306,10 +310,10 @@ app.post(
         });
       }
 
+      // Convert id to bytes32 using Ethers.js v6
       let idBytes32;
       try {
-        const utf8Bytes = ethers.encodeBytes32String(id); // v6 method for encoding to bytes32
-        idBytes32 = utf8Bytes;
+        idBytes32 = ethers.encodeBytes32String(id);
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
