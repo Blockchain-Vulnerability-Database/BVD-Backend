@@ -170,7 +170,12 @@ app.get('/status', async (req, res) => {
 app.post(
   '/addVulnerability',
   [
-    body('id').isString().notEmpty().withMessage('id is required and must be a string'),
+    body('id')
+      .isString()
+      .notEmpty()
+      .withMessage('id is required and must be a string')
+      .matches(/^BVC-[A-Z]+-\d+$/)
+      .withMessage('id must follow the naming convention: BVC-<TYPE>-<NUMBER>'),
     body('title').isString().notEmpty().withMessage('title is required and must be a string'),
     body('description').isString().notEmpty().withMessage('description is required and must be a string'),
     body('metadata').isString().notEmpty().withMessage('metadata is required and must be a string')
@@ -185,24 +190,23 @@ app.post(
     try {
       const { id, title, description, metadata } = req.body;
 
-      // Debug log for ID
-      logger.info(`Processing ID: ${id}`);
-
-      // Convert id to bytes32 using ethers or a fallback
-      let idBytes32;
-      try {
-        idBytes32 = ethers.utils.formatBytes32String(id);
-      } catch (error) {
-        logger.warn('Ethers formatBytes32String failed, using fallback conversion.');
-        if (id.length > 32) {
-          throw new Error('ID must be 32 bytes or shorter.');
-        }
-        const buffer = Buffer.alloc(32);
-        buffer.write(id);
-        idBytes32 = `0x${buffer.toString('hex')}`;
+      // Ensure ID follows the naming convention
+      if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
+        logger.warn(`Invalid ID naming convention: ${id}`);
+        return res.status(400).json({
+          error: 'Invalid ID naming convention. Must follow BVC-<TYPE>-<NUMBER> format.'
+        });
       }
 
-      logger.info(`Converted ID to bytes32: ${idBytes32}`);
+      // Convert id to bytes32
+      let idBytes32;
+      try {
+        idBytes32 = ethers.zeroPadValue(ethers.toUtf8Bytes(id), 32);
+        logger.info(`Converted ID to bytes32: ${idBytes32}`);
+      } catch (error) {
+        logger.error(`Failed to convert ID to bytes32: ${error.message}`);
+        return res.status(400).json({ error: 'Invalid ID format. Must be UTF-8 and <= 32 bytes.' });
+      }
 
       // Validate metadata file
       if (!fs.existsSync(metadata)) {
@@ -237,7 +241,6 @@ app.post(
 );
 
 // Get Vulnerability by ID
-// Get Vulnerability by ID
 app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -245,23 +248,13 @@ app.get('/getVulnerability/:id', async (req, res) => {
     logger.info(`Processing ID: ${id}`);
 
     // Convert ID to bytes32
-    let idBytes32;
-    try {
-      idBytes32 = ethers.utils.formatBytes32String(id);
-      logger.info(`Converted ID to bytes32 using formatBytes32String: ${idBytes32}`);
-    } catch (error) {
-      logger.warn(`formatBytes32String failed for ID: ${id}.`);
-      if (id.length > 32) {
-        throw new Error('ID length exceeds 32 bytes');
-      }
-      const buffer = Buffer.alloc(32, 0); // Create a 32-byte buffer
-      buffer.write(id, 'utf8'); // Write the string into the buffer
-      idBytes32 = `0x${buffer.toString('hex')}`; // Convert buffer to hex
-      logger.info(`Manually converted ID to bytes32: ${idBytes32}`);
-    }
+    const idBytes32 = ethers.zeroPadValue(ethers.toUtf8Bytes(id), 32);
 
     // Fetch vulnerability details from the contract
     const vulnerability = await contract.getVulnerability(idBytes32);
+
+    // Decode and trim null characters from the ID
+    const decodedId = parseBytes32String(vulnerability.id).replace(/\0/g, '');
 
     // Check if the returned vulnerability is valid
     if (!vulnerability.id || vulnerability.id === ZeroHash) {
@@ -271,7 +264,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
     res.json({
       status: 'success',
       vulnerability: {
-        id: parseBytes32String(vulnerability.id),
+        id: decodedId,
         title: vulnerability.title,
         description: vulnerability.description,
         ipfsCid: vulnerability.ipfsCid,
@@ -326,7 +319,7 @@ app.get('/getAllVulnerabilities', async (req, res) => {
     for (const id of ids) {
       const vuln = await contract.getVulnerability(id);
       vulnerabilities.push({
-        id: parseBytes32String(id),
+        id: parseBytes32String(id).replace(/\0/g, ''), // Trim null characters
         title: vuln.title,
         description: vuln.description,
         ipfsCid: vuln.ipfsCid,
