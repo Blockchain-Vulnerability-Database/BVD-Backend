@@ -411,6 +411,34 @@ async function uploadToIPFS(fileBuffer, filename) {
   }
 }
 
+// Retrieve file contents from IPFS
+app.get('/getFileContentsFromIPFS/:cid', async (req, res) => {
+  const { cid } = req.params;
+  // We'll guess JSON in this example; adjust as needed.
+  const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
+
+  try {
+    //    `responseType: 'arraybuffer'` to get raw binary data.
+    const response = await axios.get(gatewayUrl, { responseType: 'arraybuffer' });
+    const fileBuffer = Buffer.from(response.data);
+
+    // If you know it’s JSON, parse it. If it’s not always JSON, handle conditionally.
+    // Let's assume it's JSON:
+    const fileString = fileBuffer.toString('utf-8');
+    const parsedJson = JSON.parse(fileString);
+
+    res.setHeader('Content-Type', 'application/json');
+    return res.send(parsedJson);
+
+  } catch (error) {
+    logger.error(`Error fetching file for CID ${cid}: ${error.message}`);
+    return res.status(500).json({
+      status: 'error',
+      message: `Could not retrieve file from IPFS for CID: ${cid}`
+    });
+  }
+});
+
 // Delete File from IPFS If Not in Contract
 app.delete('/deleteFileFromIPFSIfUnreferenced/:cid', async (req, res) => {
   const { cid } = req.params;
