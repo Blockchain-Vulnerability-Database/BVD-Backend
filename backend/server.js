@@ -281,7 +281,12 @@ app.get('/getVulnerability/:id', async (req, res) => {
 app.post(
   '/setVulnerabilityStatus',
   [
-    body('id').isString().notEmpty().withMessage('id is required and must be a string'),
+    body('id')
+      .isString()
+      .notEmpty()
+      .withMessage('id is required and must be a string')
+      .matches(/^BVC-[A-Z]+-\d+$/)
+      .withMessage('id must follow the naming convention: BVC-<PLATFORM>-<NUMBER>'),
     body('isActive').isBoolean().withMessage('isActive must be a boolean value')
   ],
   async (req, res) => {
@@ -293,15 +298,39 @@ app.post(
 
     try {
       const { id, isActive } = req.body;
-      const idBytes32 = ethers.utils.formatBytes32String(id);
 
+      // Ensure ID follows the naming convention
+      if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
+        logger.warn(`Invalid ID naming convention: ${id}`);
+        return res.status(400).json({
+          error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.'
+        });
+      }
+
+      // Convert ID to bytes32
+      let idBytes32;
+      try {
+        const abiCoder = new ethers.AbiCoder();
+        idBytes32 = abiCoder.encode(['string'], [id]).slice(0, 66); // Encodes to bytes32
+        logger.info(`Converted ID to bytes32: ${idBytes32}`);
+      } catch (error) {
+        logger.error(`Failed to convert ID to bytes32: ${error.message}`);
+        return res.status(400).json({
+          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.'
+        });
+      }
+
+      // Interact with the smart contract
       const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
       const receipt = await tx.wait();
       logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
 
-      res.json({ message: 'Vulnerability status updated successfully', receipt });
+      res.json({
+        message: 'Vulnerability status updated successfully',
+        receipt
+      });
     } catch (error) {
       logger.error(`Error updating vulnerability status: ${error.message}`);
       res.status(500).json({ status: 'error', message: error.message });
