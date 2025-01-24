@@ -299,7 +299,6 @@ app.post(
     try {
       const { id, isActive } = req.body;
 
-      // Ensure ID follows the naming convention
       if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
         logger.warn(`Invalid ID naming convention: ${id}`);
         return res.status(400).json({
@@ -307,11 +306,10 @@ app.post(
         });
       }
 
-      // Convert ID to bytes32
       let idBytes32;
       try {
-        const abiCoder = new ethers.AbiCoder();
-        idBytes32 = abiCoder.encode(['string'], [id]).slice(0, 66); // Encodes to bytes32
+        const utf8Bytes = ethers.encodeBytes32String(id); // v6 method for encoding to bytes32
+        idBytes32 = utf8Bytes;
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
@@ -320,7 +318,6 @@ app.post(
         });
       }
 
-      // Interact with the smart contract
       const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
