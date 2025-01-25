@@ -166,8 +166,9 @@ app.get('/status', async (req, res) => {
   }
 });
 
-// Add Vulnerability Route
-// Add Vulnerability Route
+// ──────────── //
+// Add Vulnerability Route     //
+// ──────────── //
 app.post(
   '/addVulnerability',
   [
@@ -199,7 +200,7 @@ app.post(
         });
       }
 
-      // Convert id to bytes32 using Ethers.js v6
+      // Convert ID to bytes32 using Ethers.js v6
       let idBytes32;
       try {
         idBytes32 = ethers.encodeBytes32String(id);
@@ -213,28 +214,33 @@ app.post(
 
       // Validate metadata file
       if (!fs.existsSync(metadata)) {
-        throw new Error(`Metadata file not found: ${metadata}`);
+        logger.error(`Metadata file not found: ${metadata}`);
+        return res.status(400).json({ error: 'Metadata file not found.' });
       }
 
       const fileBuffer = fs.readFileSync(metadata);
       const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-      logger.info(`File hash calculated: ${fileHash}`);
+      logger.info(`Metadata hash calculated: ${fileHash}`);
 
       if (mockDatabase.has(fileHash)) {
         logger.warn('Vulnerability already exists in IPFS.');
         return res.status(409).json({ error: 'Vulnerability already exists in IPFS.' });
       }
 
+      // Upload metadata to IPFS
       const cid = await uploadToIPFS(fileBuffer, `${id}.json`);
       logger.info(`Uploaded metadata to IPFS. CID: ${cid}`);
 
+      // Save file hash to mock database
       mockDatabase.add(fileHash);
 
+      // Interact with the smart contract
       const tx = await contract.addVulnerability(idBytes32, title, description, cid);
       logger.info(`Transaction submitted. Hash: ${tx.hash}`);
 
       const receipt = await tx.wait();
       logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
+
       res.json({ message: 'Vulnerability added successfully', receipt });
     } catch (error) {
       logger.error(`Error adding vulnerability: ${error.message}`);
@@ -243,7 +249,9 @@ app.post(
   }
 );
 
-// Get Vulnerability by ID
+// ──────────── //
+// Get Vulnerability by ID       //
+// ──────────── //
 app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -251,7 +259,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
     logger.info(`Processing ID: ${id}`);
 
     // Convert ID to bytes32
-    const idBytes32 = ethers.zeroPadValue(ethers.toUtf8Bytes(id), 32);
+    const idBytes32 = ethers.encodeBytes32String(id);
 
     // Fetch vulnerability details from the contract
     const vulnerability = await contract.getVulnerability(idBytes32);
