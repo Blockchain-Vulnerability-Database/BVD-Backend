@@ -288,8 +288,9 @@ app.get('/getVulnerability/:id', async (req, res) => {
   }
 });
 
-// Set Vulnerability Status
-// Set Vulnerability Status Route
+// ──────────── //
+// Set Vulnerability Status     //
+// ──────────── //
 app.post(
   '/setVulnerabilityStatus',
   [
@@ -311,6 +312,7 @@ app.post(
     try {
       const { id, isActive } = req.body;
 
+      // Validate naming convention
       if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
         logger.warn(`Invalid ID naming convention: ${id}`);
         return res.status(400).json({
@@ -318,10 +320,10 @@ app.post(
         });
       }
 
-      // Convert id to bytes32 using Ethers.js v6
+      // Convert ID to bytes32
       let idBytes32;
       try {
-        idBytes32 = ethers.encodeBytes32String(id);
+        idBytes32 = ethers.encodeBytes32String(id); // Ethers.js v6 method
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
@@ -330,18 +332,29 @@ app.post(
         });
       }
 
-      const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
-      logger.info(`Transaction submitted. Hash: ${tx.hash}`);
+      // Interact with smart contract
+      let receipt;
+      try {
+        const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
+        logger.info(`Transaction submitted. Hash: ${tx.hash}`);
+        receipt = await tx.wait();
+        logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
+      } catch (error) {
+        if (error.code === 'CALL_EXCEPTION') {
+          logger.error(`Smart contract revert: ${error.reason}`);
+          return res.status(400).json({ error: error.reason || 'Smart contract execution failed' });
+        }
+        logger.error(`Error interacting with smart contract: ${error.message}`);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
 
-      const receipt = await tx.wait();
-      logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
-
+      // Success response
       res.json({
         message: 'Vulnerability status updated successfully',
         receipt
       });
     } catch (error) {
-      logger.error(`Error updating vulnerability status: ${error.message}`);
+      logger.error(`Unhandled error: ${error.message}`);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
