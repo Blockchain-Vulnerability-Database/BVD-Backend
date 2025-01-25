@@ -258,20 +258,47 @@ app.get('/getVulnerability/:id', async (req, res) => {
   try {
     logger.info(`Processing ID: ${id}`);
 
+    // Validate the ID
+    if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
+      logger.warn(`Invalid ID naming convention: ${id}`);
+      return res.status(400).json({
+        error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.',
+      });
+    }
+
     // Convert ID to bytes32
-    const idBytes32 = ethers.encodeBytes32String(id);
+    let idBytes32;
+    try {
+      idBytes32 = ethers.encodeBytes32String(id);
+      logger.info(`Converted ID to bytes32: ${idBytes32}`);
+    } catch (error) {
+      logger.error(`Failed to convert ID to bytes32: ${error.message}`);
+      return res.status(400).json({
+        error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
+      });
+    }
 
-    // Fetch vulnerability details from the contract
-    const vulnerability = await contract.getVulnerability(idBytes32);
-
-    // Decode and trim null characters from the ID
-    const decodedId = parseBytes32String(vulnerability.id).replace(/\0/g, '');
+    // Fetch vulnerability details
+    let vulnerability;
+    try {
+      vulnerability = await contract.getVulnerability(idBytes32);
+    } catch (error) {
+      if (error.code === 'CALL_EXCEPTION') {
+        logger.error(`Smart contract revert: ${error.reason}`);
+        return res.status(404).json({ error: error.reason || 'Vulnerability not found' });
+      }
+      logger.error(`Error fetching vulnerability: ${error.message}`);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
 
     // Check if the returned vulnerability is valid
     if (!vulnerability.id || vulnerability.id === ZeroHash) {
-      return res.status(404).json({ status: 'error', message: 'Vulnerability not found' });
+      logger.warn('Vulnerability does not exist');
+      return res.status(404).json({ error: 'Vulnerability does not exist' });
     }
 
+    // Decode and respond
+    const decodedId = parseBytes32String(vulnerability.id).replace(/\0/g, '');
     res.json({
       status: 'success',
       vulnerability: {
@@ -283,7 +310,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error(`Error fetching vulnerability: ${error.message}`);
+    logger.error(`Unhandled error: ${error.message}`);
     res.status(500).json({ status: 'error', message: error.message });
   }
 });
@@ -360,37 +387,57 @@ app.post(
   }
 );
 
-// Get All Vulnerabilities Route
+// ───────────── //
+// Get All Vulnerabilities Route  //
+// ───────────── //
 app.get('/getAllVulnerabilities', async (req, res) => {
   try {
-    const ids = await contract.getAllVulnerabilityIds();
-    logger.info(`Fetched ${ids.length} vulnerabilities`);
+    // Fetch all vulnerability IDs
+    let ids;
+    try {
+      ids = await contract.getAllVulnerabilityIds();
+      logger.info(`Fetched ${ids.length} vulnerabilities`);
+    } catch (error) {
+      logger.error(`Error fetching IDs from contract: ${error.message}`);
+      return res.status(500).json({ error: 'Failed to retrieve vulnerabilities from the contract' });
+    }
 
+    // Fetch details for each vulnerability
     const vulnerabilities = [];
     for (const id of ids) {
-      const vuln = await contract.getVulnerability(id);
-      vulnerabilities.push({
-        id: parseBytes32String(id).replace(/\0/g, ''), // Trim null characters
-        title: vuln.title,
-        description: vuln.description,
-        ipfsCid: vuln.ipfsCid,
-        isActive: vuln.isActive
-      });
+      try {
+        const vuln = await contract.getVulnerability(id);
+        vulnerabilities.push({
+          id: parseBytes32String(id).replace(/\0/g, ''), // Trim null characters
+          title: vuln.title,
+          description: vuln.description,
+          ipfsCid: vuln.ipfsCid,
+          isActive: vuln.isActive,
+        });
+      } catch (error) {
+        logger.error(`Error fetching details for ID: ${id}. Message: ${error.message}`);
+        vulnerabilities.push({
+          id: parseBytes32String(id).replace(/\0/g, ''),
+          error: 'Failed to fetch details for this vulnerability',
+        });
+      }
     }
 
     res.json({ status: 'success', vulnerabilities });
   } catch (error) {
-    logger.error('Error fetching all vulnerabilities:', error.message);
+    logger.error(`Unhandled error in /getAllVulnerabilities: ${error.message}`);
     res.status(500).json({ status: 'error', message: error.message });
   }
 });
 
-// Get Paginated Vulnerabilities Route
+// ───────────────── //
+// Get Paginated Vulnerabilities Route   //
+// ───────────────── //
 app.get(
   '/getVulnerabilitiesPaginated',
   [
     query('page').isInt({ gt: 0 }).withMessage('Page must be a positive integer'),
-    query('pageSize').isInt({ gt: 0 }).withMessage('Page size must be a positive integer')
+    query('pageSize').isInt({ gt: 0 }).withMessage('Page size must be a positive integer'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -402,24 +449,40 @@ app.get(
     const { page, pageSize } = req.query;
 
     try {
-      const ids = await contract.getPaginatedVulnerabilityIds(page, pageSize);
-      logger.info(`Fetched ${ids.length} vulnerabilities for page ${page} with size ${pageSize}`);
+      // Fetch paginated IDs
+      let ids;
+      try {
+        ids = await contract.getPaginatedVulnerabilityIds(page, pageSize);
+        logger.info(`Fetched ${ids.length} vulnerabilities for page ${page} with size ${pageSize}`);
+      } catch (error) {
+        logger.error(`Error fetching paginated IDs: ${error.message}`);
+        return res.status(500).json({ error: 'Failed to retrieve paginated vulnerabilities' });
+      }
 
+      // Fetch details for each vulnerability
       const vulnerabilities = [];
       for (const id of ids) {
-        const vuln = await contract.getVulnerability(id);
-        vulnerabilities.push({
-          id: parseBytes32String(id),
-          title: vuln.title,
-          description: vuln.description,
-          ipfsCid: vuln.ipfsCid,
-          isActive: vuln.isActive
-        });
+        try {
+          const vuln = await contract.getVulnerability(id);
+          vulnerabilities.push({
+            id: parseBytes32String(id).replace(/\0/g, ''), // Trim null characters
+            title: vuln.title,
+            description: vuln.description,
+            ipfsCid: vuln.ipfsCid,
+            isActive: vuln.isActive,
+          });
+        } catch (error) {
+          logger.error(`Error fetching details for ID: ${id}. Message: ${error.message}`);
+          vulnerabilities.push({
+            id: parseBytes32String(id).replace(/\0/g, ''),
+            error: 'Failed to fetch details for this vulnerability',
+          });
+        }
       }
 
       res.json({ status: 'success', vulnerabilities });
     } catch (error) {
-      logger.error('Error fetching paginated vulnerabilities:', error.message);
+      logger.error(`Unhandled error in /getVulnerabilitiesPaginated: ${error.message}`);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
