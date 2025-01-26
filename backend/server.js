@@ -11,6 +11,11 @@ const FormData = require('form-data');
 const crypto = require('crypto');
 const { body, validationResult, query } = require('express-validator');
 const { v4: uuidv4 } = require('uuid'); // Import UUID library
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const whitelist = ['127.0.0.1', '192.168.1.1']; // Add IPs to whitelist
+const isWhitelisted = (req) => whitelist.includes(req.ip);
+const cors = require('cors'); 
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Logger Setup
@@ -74,6 +79,18 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
+// validation for PRIVATE_KEY and CONTRACT_ADDRESS
+
+if (!/^([a-fA-F0-9]{64})$/.test(process.env.PRIVATE_KEY)) {
+  logger.error('Invalid PRIVATE_KEY format. Must be a 64-character hexadecimal string.');
+  process.exit(1);
+}
+
+if (!/^0x[a-fA-F0-9]{40}$/.test(process.env.CONTRACT_ADDRESS)) {
+  logger.error('Invalid CONTRACT_ADDRESS format. Must be a valid Ethereum address.');
+  process.exit(1);
+}
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Initialize Ethers.js
 // ───────────────────────────────────────────────────────────────────────────────
@@ -133,20 +150,50 @@ logger.info(`Contract initialized at address: ${contractAddress}`);
 const app = express();
 app.use(express.json());
 
-// Request/Response Logging
+// CORS Implementation
+app.use(helmet());
 app.use(
-  expressWinston.logger({
-    transports: [
-      new winston.transports.Console(),
-      new winston.transports.File({ filename: 'logs/requests.log' })
-    ],
-    format: winston.format.json(),
-    meta: true,
-    msg: 'HTTP {{req.method}} {{req.url}}',
-    expressFormat: true,
-    colorize: false
+  cors({
+    origin: ['https://your-frontend-domain.com'], // Replace with your frontend domain
+    methods: ['GET', 'POST'], // Allow specific HTTP methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allow specific headers
   })
 );
+
+// const corsOptions = {
+//   origin: ['http://localhost:3000', 'https://yourfrontenddomain.com'], // Allowed origins
+//   methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed HTTP methods
+//   allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
+// };
+
+// app.use(cors(corsOptions));
+
+// Set custom HTTP response headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent MIME type sniffing
+  res.setHeader('X-Frame-Options', 'DENY'); // Prevent Clickjacking
+  res.setHeader('X-XSS-Protection', '1; mode=block'); // Enable XSS Protection in older browsers
+  res.setHeader('X-Powered-By', 'Vulnerability Registry Service'); // Custom branding header
+  next();
+});
+
+// Rate Limiting Middleware
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: 'Too many requests from this IP, please try again later.',
+  skip: isWhitelisted, // Skip rate limiting for whitelisted IPs
+  handler: (req, res) => {
+    logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json({
+      status: 'error',
+      message: 'Rate limit exceeded. Please try again later.',
+    });
+  },
+});
+
+// Apply rate limiting
+app.use(apiLimiter);
 
 // Mock database for CIDs (replace with a real DB in production)
 const mockDatabase = new Set();
@@ -249,6 +296,8 @@ app.post(
   [
     body('id')
       .isString()
+      .trim()
+      .escape()
       .notEmpty()
       .withMessage('id is required and must be a string')
       .matches(/^BVC-[A-Z]+-\d+$/)
@@ -257,14 +306,24 @@ app.post(
       .withMessage('id must be at most 32 characters long'),
     body('title')
       .isString()
+      .trim()
+      .escape()
       .notEmpty()
-      .withMessage('title is required and must be a string'),
+      .withMessage('title is required and must be a string')
+      .isLength({ max: 256 })
+      .withMessage('title must not exceed 256 characters'),
     body('description')
       .isString()
+      .trim()
+      .escape()
       .notEmpty()
-      .withMessage('description is required and must be a string'),
+      .withMessage('description is required and must be a string')
+      .isLength({ max: 2000 })
+      .withMessage('description must not exceed 2000 characters'),
     body('metadata')
       .isString()
+      .trim()
+      .escape()
       .notEmpty()
       .withMessage('metadata is required and must be a valid string')
       .custom((value) => fs.existsSync(value))
@@ -279,14 +338,6 @@ app.post(
 
     try {
       const { id, title, description, metadata } = req.body;
-
-      // Ensure ID follows the naming convention
-      if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
-        logger.warn(`Invalid ID naming convention: ${id}`);
-        return res.status(400).json({
-          error: 'Invalid ID naming convention. Must follow BVC-<TYPE>-<NUMBER> format.',
-        });
-      }
 
       // Convert id to bytes32 using Ethers.js v6
       let idBytes32;
@@ -359,7 +410,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
   try {
     logger.info(`Processing request for ID: ${id}`);
 
-    // Validate the ID
+    // Validate and sanitize the ID
     if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
       logger.warn(`Invalid ID naming convention: ${id}`);
       return res.status(400).json({
@@ -367,10 +418,12 @@ app.get('/getVulnerability/:id', async (req, res) => {
       });
     }
 
+    const sanitizedId = id.trim().replace(/[^a-zA-Z0-9-]/g, ''); // Remove any invalid characters
+
     // Convert ID to bytes32
     let idBytes32;
     try {
-      idBytes32 = ethers.encodeBytes32String(id);
+      idBytes32 = ethers.encodeBytes32String(sanitizedId);
       logger.info(`Converted ID to bytes32: ${idBytes32}`);
     } catch (error) {
       logger.error(`Failed to convert ID to bytes32: ${error.message}`);
@@ -424,11 +477,15 @@ app.post(
   [
     body('id')
       .isString()
+      .trim()
+      .escape()
       .notEmpty()
       .withMessage('id is required and must be a string')
       .matches(/^BVC-[A-Z]+-\d+$/)
       .withMessage('id must follow the naming convention: BVC-<PLATFORM>-<NUMBER>'),
-    body('isActive').isBoolean().withMessage('isActive must be a boolean value'),
+    body('isActive')
+      .isBoolean()
+      .withMessage('isActive must be a boolean value'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -440,18 +497,12 @@ app.post(
     try {
       const { id, isActive } = req.body;
 
-      // Validate naming convention
-      if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
-        logger.warn(`Invalid ID naming convention: ${id}`);
-        return res.status(400).json({
-          error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.',
-        });
-      }
+      const sanitizedId = id.trim().replace(/[^a-zA-Z0-9-]/g, ''); // Sanitize ID input
 
       // Convert ID to bytes32
       let idBytes32;
       try {
-        idBytes32 = ethers.encodeBytes32String(id);
+        idBytes32 = ethers.encodeBytes32String(sanitizedId);
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
@@ -537,8 +588,14 @@ app.get('/getAllVulnerabilities', async (req, res) => {
 app.get(
   '/getVulnerabilitiesPaginated',
   [
-    query('page').isInt({ gt: 0 }).withMessage('Page must be a positive integer'),
-    query('pageSize').isInt({ gt: 0 }).withMessage('Page size must be a positive integer'),
+    query('page')
+      .isInt({ gt: 0 })
+      .withMessage('Page must be a positive integer')
+      .toInt(),
+    query('pageSize')
+      .isInt({ gt: 0, lt: 101 }) // Limit page size to 100
+      .withMessage('Page size must be a positive integer between 1 and 100')
+      .toInt(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -588,6 +645,22 @@ app.get(
     }
   }
 );
+
+// ───────────── //
+// Global Exception Handler      //
+// ───────────── //
+app.use((err, req, res, next) => {
+  const requestId = req.requestId || 'No-Request-ID';
+  logger.error(`Unhandled Exception [${requestId}]:`, {
+    message: err.message,
+    stack: err.stack,
+  });
+  res.status(500).json({
+    status: 'error',
+    message: 'An unexpected error occurred. Please try again later.',
+    requestId,
+  });
+});
 
 // ───────────────────────────────────────────────────────────────────────────────
 // IPFS Functions
