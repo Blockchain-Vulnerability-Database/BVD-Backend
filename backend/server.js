@@ -203,7 +203,7 @@ app.get('/status', async (req, res) => {
 
 // ──────────── //
 // Health Check Route           //
-// ──────────── //
+// ──────────── // 
 app.get('/health', async (req, res) => {
   const healthStatus = {
     server: 'up',
