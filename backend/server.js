@@ -10,6 +10,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const crypto = require('crypto');
 const { body, validationResult, query } = require('express-validator');
+const { v4: uuidv4 } = require('uuid'); // Import UUID library
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Logger Setup
@@ -149,6 +150,38 @@ app.use(
 
 // Mock database for CIDs (replace with a real DB in production)
 const mockDatabase = new Set();
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Request ID Tracking for Logging
+// ───────────────────────────────────────────────────────────────────────────────
+
+// Add Request ID Middleware
+app.use((req, res, next) => {
+  req.requestId = uuidv4(); // Generate a unique request ID
+  logger.info(`Request ID: ${req.requestId} - ${req.method} ${req.url}`); // Log the request ID
+  res.set('X-Request-ID', req.requestId); // Include request ID in the response headers
+  next();
+});
+
+// Request/Response Logging
+app.use(
+  expressWinston.logger({
+    transports: [
+      new winston.transports.Console(),
+      new winston.transports.File({ filename: 'logs/requests.log' }),
+    ],
+    format: winston.format.json(),
+    meta: true,
+    msg: 'HTTP {{req.method}} {{req.url}}',
+    expressFormat: true,
+    colorize: false,
+    dynamicMeta: (req, res) => {
+      return {
+        requestId: req.requestId, 
+      };
+    },
+  })
+);
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Routes
