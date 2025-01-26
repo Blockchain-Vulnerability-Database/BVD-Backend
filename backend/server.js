@@ -322,22 +322,26 @@ app.post(
       .withMessage('description must not exceed 2000 characters'),
     body('metadata')
       .isString()
-      .trim()
-      .escape()
       .notEmpty()
       .withMessage('metadata is required and must be a valid string')
-      .custom((value) => fs.existsSync(value))
-      .withMessage('metadata file path is invalid or does not exist'),
+      .custom((value) => {
+        const resolvedPath = path.resolve(value); // Cross-platform path handling
+        if (!fs.existsSync(resolvedPath)) {
+          throw new Error(`Metadata file path is invalid or does not exist: ${resolvedPath}`);
+        }
+        return true;
+      }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       logger.warn('Validation failed:', errors.array());
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ status: 'error', errors: errors.array() });
     }
 
     try {
       const { id, title, description, metadata } = req.body;
+      const resolvedPath = path.resolve(metadata);
 
       // Convert id to bytes32 using Ethers.js v6
       let idBytes32;
@@ -347,28 +351,33 @@ app.post(
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
         return res.status(400).json({
-          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
+          status: 'error',
+          message: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
         });
       }
 
       // Validate metadata file
-      if (!fs.existsSync(metadata)) {
-        logger.error(`Metadata file not found: ${metadata}`);
-        return res.status(400).json({ error: 'Metadata file not found.' });
-      }
-
-      const fileBuffer = fs.readFileSync(metadata);
+      const fileBuffer = fs.readFileSync(resolvedPath);
       const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
       logger.info(`Metadata hash calculated: ${fileHash}`);
 
       if (mockDatabase.has(fileHash)) {
         logger.warn('Vulnerability already exists in IPFS.');
-        return res.status(409).json({ error: 'Vulnerability already exists in IPFS.' });
+        return res.status(409).json({ status: 'error', message: 'Vulnerability already exists in IPFS.' });
       }
 
       // Upload metadata to IPFS
-      const cid = await uploadToIPFS(fileBuffer, `${id}.json`);
-      logger.info(`Uploaded metadata to IPFS. CID: ${cid}`);
+      let cid;
+      try {
+        cid = await uploadToIPFS(fileBuffer, `${id}.json`);
+        logger.info(`Uploaded metadata to IPFS. CID: ${cid}`);
+      } catch (error) {
+        logger.error(`Error uploading metadata to IPFS: ${error.message}`);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to upload metadata to IPFS.',
+        });
+      }
 
       // Save file hash to mock database
       mockDatabase.add(fileHash);
@@ -383,16 +392,30 @@ app.post(
       } catch (error) {
         if (error.code === 'CALL_EXCEPTION') {
           logger.error(`Smart contract execution reverted: ${error.reason}`);
-          return res.status(500).json({ error: error.reason || 'Smart contract execution failed.' });
+          return res.status(500).json({
+            status: 'error',
+            message: error.reason || 'Smart contract execution failed.',
+          });
         }
         logger.error(`Error interacting with smart contract: ${error.message}`);
-        return res.status(500).json({ error: 'Failed to add vulnerability to the blockchain.' });
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to add vulnerability to the blockchain.',
+        });
       }
 
       // Respond with success
       res.status(201).json({
+        status: 'success',
         message: 'Vulnerability added successfully.',
-        receipt,
+        data: {
+          id,
+          title,
+          description,
+          cid,
+          fileHash,
+          receipt,
+        },
       });
     } catch (error) {
       logger.error(`Unhandled error in /addVulnerability: ${error.message}`);
@@ -408,17 +431,19 @@ app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    logger.info(`Processing request for ID: ${id}`);
+    logger.info(`Processing request to fetch vulnerability by ID: ${id}`);
 
     // Validate and sanitize the ID
     if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
       logger.warn(`Invalid ID naming convention: ${id}`);
       return res.status(400).json({
-        error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.',
+        status: 'error',
+        message: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.',
       });
     }
 
-    const sanitizedId = id.trim().replace(/[^a-zA-Z0-9-]/g, ''); // Remove any invalid characters
+    const sanitizedId = id.trim().replace(/[^a-zA-Z0-9-]/g, ''); // Remove invalid characters
+    logger.info(`Sanitized ID: ${sanitizedId}`);
 
     // Convert ID to bytes32
     let idBytes32;
@@ -428,32 +453,43 @@ app.get('/getVulnerability/:id', async (req, res) => {
     } catch (error) {
       logger.error(`Failed to convert ID to bytes32: ${error.message}`);
       return res.status(400).json({
-        error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
+        status: 'error',
+        message: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
       });
     }
 
-    // Fetch vulnerability details
+    // Fetch vulnerability details from the contract
     let vulnerability;
     try {
       vulnerability = await contract.getVulnerability(idBytes32);
+      logger.info(`Fetched vulnerability details for ID: ${sanitizedId}`);
     } catch (error) {
       if (error.code === 'CALL_EXCEPTION') {
         logger.error(`Smart contract revert: ${error.reason}`);
-        return res.status(404).json({ error: error.reason || 'Vulnerability not found' });
+        return res.status(404).json({
+          status: 'error',
+          message: error.reason || 'Vulnerability not found.',
+        });
       }
       logger.error(`Error fetching vulnerability: ${error.message}`);
-      return res.status(500).json({ error: 'Internal server error' });
+      return res.status(500).json({
+        status: 'error',
+        message: 'Internal server error while fetching vulnerability details.',
+      });
     }
 
-    // Check if the returned vulnerability is valid
+    // Validate the returned vulnerability
     if (!vulnerability.id || vulnerability.id === ZeroHash) {
-      logger.warn('Vulnerability does not exist');
-      return res.status(404).json({ error: 'Vulnerability does not exist' });
+      logger.warn(`Vulnerability does not exist for ID: ${sanitizedId}`);
+      return res.status(404).json({
+        status: 'error',
+        message: 'Vulnerability does not exist.',
+      });
     }
 
-    // Decode and respond
+    // Decode the ID and construct the response
     const decodedId = parseBytes32String(vulnerability.id).replace(/\0/g, '');
-    res.json({
+    res.status(200).json({
       status: 'success',
       vulnerability: {
         id: decodedId,
@@ -463,9 +499,13 @@ app.get('/getVulnerability/:id', async (req, res) => {
         isActive: vulnerability.isActive,
       },
     });
+    logger.info(`Successfully returned vulnerability for ID: ${sanitizedId}`);
   } catch (error) {
-    logger.error(`Unhandled error: ${error.message}`);
-    res.status(500).json({ status: 'error', message: error.message });
+    logger.error(`Unhandled error in /getVulnerability/:id: ${error.message}`);
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected error occurred while processing your request.',
+    });
   }
 });
 
@@ -490,14 +530,21 @@ app.post(
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Validation failed:', errors.array());
-      return res.status(400).json({ errors: errors.array() });
+      logger.warn('Validation failed for /setVulnerabilityStatus:', errors.array());
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation failed. Check your inputs.',
+        errors: errors.array(),
+      });
     }
 
     try {
       const { id, isActive } = req.body;
 
+      logger.info(`Processing request to set vulnerability status. ID: ${id}, isActive: ${isActive}`);
+
       const sanitizedId = id.trim().replace(/[^a-zA-Z0-9-]/g, ''); // Sanitize ID input
+      logger.info(`Sanitized ID: ${sanitizedId}`);
 
       // Convert ID to bytes32
       let idBytes32;
@@ -507,7 +554,8 @@ app.post(
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
         return res.status(400).json({
-          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
+          status: 'error',
+          message: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
         });
       }
 
@@ -520,21 +568,32 @@ app.post(
         logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
       } catch (error) {
         if (error.code === 'CALL_EXCEPTION') {
-          logger.error(`Smart contract revert: ${error.reason}`);
-          return res.status(400).json({ error: error.reason || 'Smart contract execution failed' });
+          logger.error(`Smart contract execution reverted: ${error.reason}`);
+          return res.status(400).json({
+            status: 'error',
+            message: error.reason || 'Smart contract execution failed.',
+          });
         }
-        logger.error(`Error interacting with smart contract: ${error.message}`);
-        return res.status(500).json({ error: 'Internal server error' });
+        logger.error(`Error interacting with the smart contract: ${error.message}`);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Internal server error while interacting with the smart contract.',
+        });
       }
 
       // Success response
-      res.json({
-        message: 'Vulnerability status updated successfully',
+      res.status(200).json({
+        status: 'success',
+        message: 'Vulnerability status updated successfully.',
         receipt,
       });
+      logger.info(`Successfully updated vulnerability status for ID: ${sanitizedId}`);
     } catch (error) {
-      logger.error(`Unhandled error: ${error.message}`);
-      res.status(500).json({ status: 'error', message: error.message });
+      logger.error(`Unhandled error in /setVulnerabilityStatus: ${error.message}`);
+      res.status(500).json({
+        status: 'error',
+        message: 'An unexpected error occurred while processing your request.',
+      });
     }
   }
 );
@@ -544,14 +603,19 @@ app.post(
 // ───────────── //
 app.get('/getAllVulnerabilities', async (req, res) => {
   try {
+    logger.info('Fetching all vulnerabilities from the contract.');
+
     // Fetch all vulnerability IDs
     let ids;
     try {
       ids = await contract.getAllVulnerabilityIds();
-      logger.info(`Fetched ${ids.length} vulnerabilities`);
+      logger.info(`Fetched ${ids.length} vulnerability IDs.`);
     } catch (error) {
       logger.error(`Error fetching IDs from contract: ${error.message}`);
-      return res.status(500).json({ error: 'Failed to retrieve vulnerabilities from the contract' });
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to retrieve vulnerabilities from the contract.',
+      });
     }
 
     // Fetch details for each vulnerability
@@ -566,19 +630,27 @@ app.get('/getAllVulnerabilities', async (req, res) => {
           ipfsCid: vuln.ipfsCid,
           isActive: vuln.isActive,
         });
+        logger.info(`Fetched details for vulnerability ID: ${id}`);
       } catch (error) {
         logger.error(`Error fetching details for ID: ${id}. Message: ${error.message}`);
         vulnerabilities.push({
           id: parseBytes32String(id).replace(/\0/g, ''),
-          error: 'Failed to fetch details for this vulnerability',
+          error: 'Failed to fetch details for this vulnerability.',
         });
       }
     }
 
-    res.json({ status: 'success', vulnerabilities });
+    // Respond with success
+    res.status(200).json({
+      status: 'success',
+      vulnerabilities,
+    });
   } catch (error) {
     logger.error(`Unhandled error in /getAllVulnerabilities: ${error.message}`);
-    res.status(500).json({ status: 'error', message: error.message });
+    res.status(500).json({
+      status: 'error',
+      message: 'An unexpected error occurred while processing your request.',
+    });
   }
 });
 
@@ -600,8 +672,12 @@ app.get(
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn('Validation failed:', errors.array());
-      return res.status(400).json({ errors: errors.array() });
+      logger.warn(`Validation failed for pagination parameters: ${JSON.stringify(errors.array())}`);
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid pagination parameters provided.',
+        errors: errors.array(),
+      });
     }
 
     const { page, pageSize } = req.query;
@@ -613,8 +689,11 @@ app.get(
         ids = await contract.getPaginatedVulnerabilityIds(page, pageSize);
         logger.info(`Fetched ${ids.length} vulnerabilities for page ${page} with size ${pageSize}`);
       } catch (error) {
-        logger.error(`Error fetching paginated IDs: ${error.message}`);
-        return res.status(500).json({ error: 'Failed to retrieve paginated vulnerabilities' });
+        logger.error(`Error fetching paginated IDs from the contract: ${error.message}`);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to retrieve paginated vulnerabilities from the contract.',
+        });
       }
 
       // Fetch details for each vulnerability
@@ -630,18 +709,28 @@ app.get(
             isActive: vuln.isActive,
           });
         } catch (error) {
-          logger.error(`Error fetching details for ID: ${id}. Message: ${error.message}`);
+          logger.error(
+            `Error fetching details for ID: ${id}. Message: ${error.message}`
+          );
           vulnerabilities.push({
             id: parseBytes32String(id).replace(/\0/g, ''),
-            error: 'Failed to fetch details for this vulnerability',
+            error: 'Failed to fetch details for this vulnerability.',
           });
         }
       }
 
-      res.json({ status: 'success', vulnerabilities });
+      res.status(200).json({
+        status: 'success',
+        data: vulnerabilities,
+        page,
+        pageSize,
+      });
     } catch (error) {
       logger.error(`Unhandled error in /getVulnerabilitiesPaginated: ${error.message}`);
-      res.status(500).json({ status: 'error', message: error.message });
+      res.status(500).json({
+        status: 'error',
+        message: 'An unexpected error occurred. Please try again later.',
+      });
     }
   }
 );
