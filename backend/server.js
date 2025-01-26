@@ -252,10 +252,23 @@ app.post(
       .notEmpty()
       .withMessage('id is required and must be a string')
       .matches(/^BVC-[A-Z]+-\d+$/)
-      .withMessage('id must follow the naming convention: BVC-<TYPE>-<NUMBER>'),
-    body('title').isString().notEmpty().withMessage('title is required and must be a string'),
-    body('description').isString().notEmpty().withMessage('description is required and must be a string'),
-    body('metadata').isString().notEmpty().withMessage('metadata is required and must be a string')
+      .withMessage('id must follow the naming convention: BVC-<TYPE>-<NUMBER>')
+      .isLength({ max: 32 })
+      .withMessage('id must be at most 32 characters long'),
+    body('title')
+      .isString()
+      .notEmpty()
+      .withMessage('title is required and must be a string'),
+    body('description')
+      .isString()
+      .notEmpty()
+      .withMessage('description is required and must be a string'),
+    body('metadata')
+      .isString()
+      .notEmpty()
+      .withMessage('metadata is required and must be a valid string')
+      .custom((value) => fs.existsSync(value))
+      .withMessage('metadata file path is invalid or does not exist'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -271,11 +284,11 @@ app.post(
       if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
         logger.warn(`Invalid ID naming convention: ${id}`);
         return res.status(400).json({
-          error: 'Invalid ID naming convention. Must follow BVC-<TYPE>-<NUMBER> format.'
+          error: 'Invalid ID naming convention. Must follow BVC-<TYPE>-<NUMBER> format.',
         });
       }
 
-      // Convert ID to bytes32 using Ethers.js v6
+      // Convert id to bytes32 using Ethers.js v6
       let idBytes32;
       try {
         idBytes32 = ethers.encodeBytes32String(id);
@@ -283,7 +296,7 @@ app.post(
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
         return res.status(400).json({
-          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.'
+          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
         });
       }
 
@@ -310,15 +323,28 @@ app.post(
       mockDatabase.add(fileHash);
 
       // Interact with the smart contract
-      const tx = await contract.addVulnerability(idBytes32, title, description, cid);
-      logger.info(`Transaction submitted. Hash: ${tx.hash}`);
+      let tx, receipt;
+      try {
+        tx = await contract.addVulnerability(idBytes32, title, description, cid);
+        logger.info(`Transaction submitted. Hash: ${tx.hash}`);
+        receipt = await tx.wait();
+        logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
+      } catch (error) {
+        if (error.code === 'CALL_EXCEPTION') {
+          logger.error(`Smart contract execution reverted: ${error.reason}`);
+          return res.status(500).json({ error: error.reason || 'Smart contract execution failed.' });
+        }
+        logger.error(`Error interacting with smart contract: ${error.message}`);
+        return res.status(500).json({ error: 'Failed to add vulnerability to the blockchain.' });
+      }
 
-      const receipt = await tx.wait();
-      logger.info(`Transaction confirmed. Receipt: ${JSON.stringify(receipt)}`);
-
-      res.json({ message: 'Vulnerability added successfully', receipt });
+      // Respond with success
+      res.status(201).json({
+        message: 'Vulnerability added successfully.',
+        receipt,
+      });
     } catch (error) {
-      logger.error(`Error adding vulnerability: ${error.message}`);
+      logger.error(`Unhandled error in /addVulnerability: ${error.message}`);
       res.status(500).json({ status: 'error', message: error.message });
     }
   }
@@ -331,7 +357,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    logger.info(`Processing ID: ${id}`);
+    logger.info(`Processing request for ID: ${id}`);
 
     // Validate the ID
     if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
@@ -402,7 +428,7 @@ app.post(
       .withMessage('id is required and must be a string')
       .matches(/^BVC-[A-Z]+-\d+$/)
       .withMessage('id must follow the naming convention: BVC-<PLATFORM>-<NUMBER>'),
-    body('isActive').isBoolean().withMessage('isActive must be a boolean value')
+    body('isActive').isBoolean().withMessage('isActive must be a boolean value'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -418,23 +444,23 @@ app.post(
       if (!/^BVC-[A-Z]+-\d+$/.test(id)) {
         logger.warn(`Invalid ID naming convention: ${id}`);
         return res.status(400).json({
-          error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.'
+          error: 'Invalid ID naming convention. Must follow BVC-<PLATFORM>-<NUMBER> format.',
         });
       }
 
       // Convert ID to bytes32
       let idBytes32;
       try {
-        idBytes32 = ethers.encodeBytes32String(id); // Ethers.js v6 method
+        idBytes32 = ethers.encodeBytes32String(id);
         logger.info(`Converted ID to bytes32: ${idBytes32}`);
       } catch (error) {
         logger.error(`Failed to convert ID to bytes32: ${error.message}`);
         return res.status(400).json({
-          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.'
+          error: 'Invalid ID format. Must be a UTF-8 string and <= 32 bytes.',
         });
       }
 
-      // Interact with smart contract
+      // Interact with the smart contract
       let receipt;
       try {
         const tx = await contract.setVulnerabilityStatus(idBytes32, isActive);
@@ -453,7 +479,7 @@ app.post(
       // Success response
       res.json({
         message: 'Vulnerability status updated successfully',
-        receipt
+        receipt,
       });
     } catch (error) {
       logger.error(`Unhandled error: ${error.message}`);
