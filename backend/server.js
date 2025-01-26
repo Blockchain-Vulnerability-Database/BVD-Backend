@@ -187,7 +187,9 @@ app.use(
 // Routes
 // ───────────────────────────────────────────────────────────────────────────────
 
-// Status Route
+// ─────── //
+// Status Route     //
+// ─────── //
 app.get('/status', async (req, res) => {
   try {
     const blockNumber = await provider.getBlockNumber();
@@ -197,6 +199,46 @@ app.get('/status', async (req, res) => {
     logger.error('Error during status check:', error.message);
     res.status(500).json({ status: 'error', message: error.message });
   }
+});
+
+// ──────────── //
+// Health Check Route           //
+// ──────────── //
+app.get('/health', async (req, res) => {
+  const healthStatus = {
+    server: 'up',
+    blockchain: 'unknown',
+    ipfs: 'unknown',
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    const blockNumber = await provider.getBlockNumber();
+    healthStatus.blockchain = `connected, blockNumber: ${blockNumber}`;
+  } catch (error) {
+    healthStatus.blockchain = 'error';
+    logger.error('Blockchain health check failed:', error.message);
+  }
+
+  try {
+    const testCID = 'bafkreiaa4mfugumvhfmly7cw73icvfnqmvaycnal3f4dukmyhutaugospu';
+    const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${testCID}`, {
+      timeout: 3000,
+    });
+    if (response.status === 200) {
+      healthStatus.ipfs = 'connected';
+    }
+  } catch (error) {
+    healthStatus.ipfs = 'error';
+    logger.error('IPFS health check failed:', error.message);
+  }
+
+  const allSystemsOperational =
+    healthStatus.server === 'up' &&
+    healthStatus.blockchain.includes('connected') &&
+    healthStatus.ipfs === 'connected';
+
+  res.status(allSystemsOperational ? 200 : 503).json(healthStatus);
 });
 
 // ──────────── //
