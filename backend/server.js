@@ -128,6 +128,8 @@ app.post('/addVulnerability', async (req, res) => {
     
     const receipt = await tx.wait();
 
+    console.log(`Blockchain Transaction Success: TxHash ${tx.hash} mined in block ${receipt.blockNumber}`);
+
     res.status(201).json({
       message: 'Vulnerability recorded',
       blockchain: {
