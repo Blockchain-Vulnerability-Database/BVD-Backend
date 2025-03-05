@@ -154,7 +154,7 @@ app.post('/addVulnerability', async (req, res) => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Improved Vulnerability Retrieval Route
+// Vulnerability Retrieval Route
 // ───────────────────────────────────────────────────────────────────────────────
 app.get('/getVulnerability/:id', async (req, res) => {
   try {
@@ -168,44 +168,64 @@ app.get('/getVulnerability/:id', async (req, res) => {
       });
     }
 
-    // Blockchain lookup
     const idBytes32 = ethers.encodeBytes32String(id);
-    const vulnerability = await contract.getVulnerability(idBytes32);
+    
+    try {
+      // Use the contract's getVulnerability function
+      const vulnerability = await contract.getVulnerability(idBytes32);
 
-    // Check existence
-    if (vulnerability.id === ethers.ZeroHash) {
-      return res.status(404).json({ 
-        error: 'Vulnerability not found' 
-      });
-    }
-
-    // Fetch IPFS data
-    let ipfsData = null;
-    if (vulnerability.ipfsCid) {
-      try {
-        const response = await axios.get(
-          `https://gateway.pinata.cloud/ipfs/${vulnerability.ipfsCid}`,
-          { timeout: 3000 }
-        );
-        ipfsData = response.data;
-      } catch (ipfsError) {
-        console.warn('IPFS metadata fetch failed:', ipfsError.message);
+      // Check existence using version number (new entries start at 1)
+      if (vulnerability.version.toString() === "0") {
+        return res.status(404).json({ 
+          error: 'Vulnerability not found' 
+        });
       }
-    }
 
-    // Format response
-    res.json({
-      id: id,
-      title: vulnerability.title,
-      description: vulnerability.description,
-      version: vulnerability.version.toString(),
-      status: vulnerability.isActive ? 'active' : 'inactive',
-      ipfs: {
-        cid: vulnerability.ipfsCid,
-        data: ipfsData
-      },
-      contract: contractAddress
-    });
+      // Fetch IPFS data
+      let ipfsData = null;
+      if (vulnerability.ipfsCid) {
+        try {
+          const response = await axios.get(
+            `https://gateway.pinata.cloud/ipfs/${vulnerability.ipfsCid}`,
+            { timeout: 3000 }
+          );
+          ipfsData = response.data;
+        } catch (ipfsError) {
+          console.warn('IPFS metadata fetch failed:', ipfsError.message);
+        }
+      }
+
+      // Format response
+      res.json({
+        id: id,
+        title: vulnerability.title,
+        description: vulnerability.description,
+        version: vulnerability.version.toString(),
+        status: vulnerability.isActive ? 'active' : 'inactive',
+        ipfs: {
+          cid: vulnerability.ipfsCid,
+          data: ipfsData
+        },
+        contract: contractAddress
+      });
+
+    } catch (error) {
+      // Handle zkEVM-specific error format
+      if (error.info?.error?.message?.includes('invalid opcode: MCOPY')) {
+        return res.status(404).json({ 
+          error: 'Vulnerability not found' 
+        });
+      }
+      
+      // Handle general contract errors
+      if (error.code === 'CALL_EXCEPTION') {
+        return res.status(404).json({ 
+          error: 'Vulnerability not found' 
+        });
+      }
+
+      throw error;
+    }
 
   } catch (error) {
     console.error('Retrieval Error:', error);
