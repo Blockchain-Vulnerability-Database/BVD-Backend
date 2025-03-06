@@ -3,13 +3,13 @@ const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 const { ethers } = require('ethers');
+const { toUtf8Bytes } = ethers;
 const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
 app.use(express.json());
 
-// Updated Blockchain Setup section
 // ───────────────────────────────────────────────────────────────────────────────
 // Blockchain Setup with Dynamic ABI Loading
 // ───────────────────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ async function uploadToIPFS(fileBuffer, filename) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// Enhanced Vulnerability Submission Route
+// Vulnerability Submission Routes
 // ───────────────────────────────────────────────────────────────────────────────
 app.post('/addVulnerability', async (req, res) => {
   try {
@@ -117,8 +117,10 @@ app.post('/addVulnerability', async (req, res) => {
     const fileBuffer = Buffer.from(JSON.stringify(vulnerabilityData, null, 2));
     const ipfsCid = await uploadToIPFS(fileBuffer, `${vulnerabilityData.id}.json`);
 
-    // Blockchain interaction
-    const idBytes32 = ethers.encodeBytes32String(vulnerabilityData.id);
+    // Generate ID using same keccak256 hashing as contract
+    const idBytes32 = ethers.keccak256(ethers.toUtf8Bytes(vulnerabilityData.id));
+
+    // Submit to blockchain
     const tx = await contract.addVulnerability(
       idBytes32,
       vulnerabilityData.title,
@@ -126,12 +128,22 @@ app.post('/addVulnerability', async (req, res) => {
       ipfsCid
     );
     
+    // Wait for confirmation
     const receipt = await tx.wait();
 
-    console.log(`Blockchain Transaction Success: TxHash ${tx.hash} mined in block ${receipt.blockNumber}`);
+    // Log success with both ID formats
+    console.log(`Successfully added vulnerability:
+    - Text ID: ${vulnerabilityData.id}
+    - Bytes32 ID: ${idBytes32}
+    - TX Hash: ${tx.hash}
+    - Block: ${receipt.blockNumber}`);
 
     res.status(201).json({
       message: 'Vulnerability recorded',
+      identifiers: {
+        text: vulnerabilityData.id,
+        bytes32: idBytes32
+      },
       blockchain: {
         txHash: tx.hash,
         block: receipt.blockNumber,
@@ -139,23 +151,26 @@ app.post('/addVulnerability', async (req, res) => {
       },
       ipfs: {
         cid: ipfsCid,
-        url: `https://ipfs.io/ipfs/${ipfsCid}`
+        url: `https://gateway.pinata.cloud/ipfs/${ipfsCid}`
       }
     });
 
   } catch (error) {
     console.error('Submission Error:', error);
+    
+    // Enhanced error handling
     const statusCode = error.message.includes('already exists') ? 409 : 500;
+    const errorMessage = error.message.includes('already exists') 
+      ? `Vulnerability ID '${req.body.filePath?.id}' already exists` 
+      : 'Submission failed';
+
     res.status(statusCode).json({
-      error: 'Submission failed',
-      details: error.message
+      error: errorMessage,
+      details: error.info?.error?.message || error.message
     });
   }
 });
 
-// ───────────────────────────────────────────────────────────────────────────────
-// Vulnerability Retrieval Route
-// ───────────────────────────────────────────────────────────────────────────────
 app.get('/getVulnerability/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -168,20 +183,22 @@ app.get('/getVulnerability/:id', async (req, res) => {
       });
     }
 
-    const idBytes32 = ethers.encodeBytes32String(id);
-    
+    // Generate ID using same method as contract
+    const idBytes32 = ethers.keccak256(ethers.toUtf8Bytes(id));
+
     try {
-      // Use the contract's getVulnerability function
+      // Get vulnerability details from contract
       const vulnerability = await contract.getVulnerability(idBytes32);
 
-      // Check existence using version number (new entries start at 1)
+      // Check existence using version number (0 = not found)
       if (vulnerability.version.toString() === "0") {
         return res.status(404).json({ 
-          error: 'Vulnerability not found' 
+          error: 'Vulnerability not found',
+          details: `No entry for ID: ${id} (${idBytes32})`
         });
       }
 
-      // Fetch IPFS data
+      // Retrieve IPFS metadata if available
       let ipfsData = null;
       if (vulnerability.ipfsCid) {
         try {
@@ -191,39 +208,47 @@ app.get('/getVulnerability/:id', async (req, res) => {
           );
           ipfsData = response.data;
         } catch (ipfsError) {
-          console.warn('IPFS metadata fetch failed:', ipfsError.message);
+          console.warn(`IPFS fetch failed for ${id}:`, ipfsError.message);
         }
       }
 
-      // Format response
+      // Format comprehensive response
       res.json({
         id: id,
+        bytes32Id: idBytes32,
         title: vulnerability.title,
         description: vulnerability.description,
         version: vulnerability.version.toString(),
         status: vulnerability.isActive ? 'active' : 'inactive',
         ipfs: {
           cid: vulnerability.ipfsCid,
-          data: ipfsData
+          data: ipfsData,
+          url: `https://gateway.pinata.cloud/ipfs/${vulnerability.ipfsCid}`
         },
-        contract: contractAddress
+        blockchain: {
+          contract: contractAddress,
+          network: await provider.getNetwork()
+        }
       });
 
     } catch (error) {
       // Handle zkEVM-specific error format
       if (error.info?.error?.message?.includes('invalid opcode: MCOPY')) {
         return res.status(404).json({ 
-          error: 'Vulnerability not found' 
+          error: 'Vulnerability not found',
+          details: `zkEVM error for ID: ${id} (${idBytes32})`
         });
       }
       
       // Handle general contract errors
       if (error.code === 'CALL_EXCEPTION') {
         return res.status(404).json({ 
-          error: 'Vulnerability not found' 
+          error: 'Vulnerability not found',
+          details: `Contract reverted for ID: ${id} (${idBytes32})`
         });
       }
 
+      // Rethrow unexpected errors
       throw error;
     }
 
@@ -231,8 +256,78 @@ app.get('/getVulnerability/:id', async (req, res) => {
     console.error('Retrieval Error:', error);
     res.status(500).json({
       error: 'Failed to retrieve vulnerability',
-      details: error.message
+      details: error.message,
+      debugInfo: {
+        contractAddress,
+        rpcUrl: process.env.POLYGON_ZKEVM_RPC_URL
+      }
     });
+  }
+});
+
+app.get('/getAllVulnerabilities', async (req, res) => {
+  try {
+    let allIds;
+
+    // Fetch all vulnerability IDs from the smart contract
+    try {
+      allIds = await contract.getAllVulnerabilityIds();
+    } catch (error) {
+      console.error("Failed to fetch vulnerability IDs from contract:", error.message);
+      return res.status(500).json({ 
+        status: "error", 
+        message: "Blockchain query failed. Ensure the contract has getAllVulnerabilityIds() or try a different RPC provider." 
+      });
+    }
+
+    if (!allIds || allIds.length === 0) {
+      return res.status(404).json({ status: "error", message: "No vulnerabilities found in the contract." });
+    }
+
+    let vulnerabilities = [];
+
+    // Fetch details for each vulnerability
+    for (const id of allIds) {
+      let vuln;
+      try {
+        vuln = await contract.getVulnerability(id);
+      } catch (error) {
+        console.error(`Failed to fetch vulnerability ${id}:`, error.message);
+        continue; // Skip if this one fails
+      }
+
+      let ipfsMetadata = null;
+      let ipfsStatus = "Not Available";
+
+      // Retrieve metadata from IPFS
+      if (vuln.ipfsCid) {
+        try {
+          const ipfsResponse = await axios.get(`https://gateway.pinata.cloud/ipfs/${vuln.ipfsCid}`);
+          ipfsMetadata = ipfsResponse.data;
+          ipfsStatus = "Retrieved Successfully";
+        } catch (ipfsError) {
+          console.warn(`Failed to fetch IPFS metadata for ${id}:`, ipfsError.message);
+          ipfsStatus = "Failed to Retrieve";
+        }
+      }
+
+      vulnerabilities.push({
+        id: ethers.decodeBytes32String(id),
+        title: vuln.title,
+        description: vuln.description,
+        ipfsCid: vuln.ipfsCid,
+        isActive: vuln.isActive,
+        blockchainStatus: "Stored on Blockchain",
+        ipfsStatus: ipfsStatus,
+        metadata: ipfsMetadata,
+      });
+    }
+
+    res.json({ status: "success", vulnerabilities });
+
+  } catch (error) {
+    console.error("Error fetching all vulnerabilities:", error);
+    res.status(500).json({ status: "error", message: "Unexpected server error while fetching vulnerabilities." });
   }
 });
 
