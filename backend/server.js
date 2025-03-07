@@ -150,7 +150,7 @@ app.post('/addVulnerability', async (req, res) => {
     }
 
     // Validate required fields
-    const requiredFields = ['id', 'title', 'description', 'severity'];
+    const requiredFields = ['id', 'title', 'description', 'severity', 'platform'];
     const missingFields = requiredFields.filter(f => !vulnerabilityData[f]);
     if (missingFields.length > 0) {
       logger('addVulnerability', 'error', 'Missing required fields', { missing: missingFields });
@@ -179,7 +179,8 @@ app.post('/addVulnerability', async (req, res) => {
       idBytes32,
       vulnerabilityData.title,
       vulnerabilityData.description,
-      ipfsCid
+      ipfsCid,
+      vulnerabilityData.platform // Add platform parameter
     );
     
     logger('addVulnerability', 'info', 'Transaction submitted', { 
@@ -199,6 +200,7 @@ app.post('/addVulnerability', async (req, res) => {
     const successMessage = `Successfully added vulnerability:
     - Text ID: ${vulnerabilityData.id}
     - Bytes32 ID: ${idBytes32}
+    - Platform: ${vulnerabilityData.platform}
     - TX Hash: ${tx.hash}
     - Block: ${receipt.blockNumber}`;
     
@@ -210,6 +212,7 @@ app.post('/addVulnerability', async (req, res) => {
         text: vulnerabilityData.id,
         bytes32: idBytes32
       },
+      platform: vulnerabilityData.platform,
       blockchain: {
         txHash: tx.hash,
         block: receipt.blockNumber,
@@ -278,6 +281,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
       logger('getVulnerability', 'info', 'Vulnerability found on blockchain', { 
         id,
         title: vulnerability.title,
+        platform: vulnerability.platform,
         ipfsCid: vulnerability.ipfsCid 
       });
 
@@ -311,6 +315,7 @@ app.get('/getVulnerability/:id', async (req, res) => {
         bytes32Id: idBytes32,
         title: vulnerability.title,
         description: vulnerability.description,
+        platform: vulnerability.platform,
         version: vulnerability.version.toString(),
         status: vulnerability.isActive ? 'active' : 'inactive',
         ipfs: {
@@ -451,6 +456,7 @@ app.get('/getAllVulnerabilities', async (req, res) => {
         rawId: id, // For compatibility
         title: vuln.title,
         description: vuln.description,
+        platform: vuln.platform,
         ipfsCid: vuln.ipfsCid,
         isActive: vuln.isActive,
         blockchainStatus: "Stored on Blockchain",
