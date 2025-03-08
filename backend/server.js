@@ -790,6 +790,166 @@ app.get('/getVulnerabilityByVersion/:id/:version', async (req, res) => {
   }
 });
 
+// Add endpoint to get all vulnerability IDs
+app.get('/getAllVulnerabilityIds', async (req, res) => {
+  logger('getAllVulnerabilityIds', 'info', 'Request received');
+  
+  try {
+    // Fetch all vulnerability base IDs from the smart contract
+    logger('getAllVulnerabilityIds', 'info', 'Fetching all vulnerability IDs from contract');
+    const allIds = await contract.getAllBaseVulnerabilityIds();
+    logger('getAllVulnerabilityIds', 'info', `Retrieved ${allIds.length} vulnerability IDs`);
+    
+    // Convert bytes32 IDs to readable format if possible
+    const formattedIds = [];
+    for (const id of allIds) {
+      try {
+        // Check if we have any existing vulnerabilities to extract text ID
+        const latestId = await contract.latestVersions(id);
+        const vulnerability = await contract.vulnerabilities(latestId);
+        
+        // Try to find any IPFS metadata with the original text ID
+        let textId = null;
+        if (vulnerability.ipfsCid) {
+          try {
+            const ipfsResponse = await axios.get(
+              `https://gateway.pinata.cloud/ipfs/${vulnerability.ipfsCid}`,
+              { timeout: 2000 }
+            );
+            if (ipfsResponse.data && ipfsResponse.data.id) {
+              textId = ipfsResponse.data.id;
+            }
+          } catch (ipfsError) {
+            // Continue without IPFS data
+          }
+        }
+        
+        formattedIds.push({
+          bytes32Id: id,
+          textId: textId,
+          latestVersionId: latestId
+        });
+      } catch (error) {
+        // Just include the bytes32 ID if we can't get additional info
+        formattedIds.push({
+          bytes32Id: id,
+          textId: null,
+          latestVersionId: null
+        });
+      }
+    }
+    
+    logger('getAllVulnerabilityIds', 'success', 'Successfully retrieved vulnerability IDs');
+    res.json({
+      count: allIds.length,
+      ids: formattedIds
+    });
+    
+  } catch (error) {
+    logger('getAllVulnerabilityIds', 'error', 'Error fetching vulnerability IDs', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      error: 'Failed to retrieve vulnerability IDs',
+      details: error.message
+    });
+  }
+});
+
+// Add endpoint for paginated vulnerability IDs
+app.get('/getPaginatedVulnerabilityIds', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.pageSize) || 10;
+  
+  logger('getPaginatedVulnerabilityIds', 'info', 'Request received', { page, pageSize });
+  
+  try {
+    // Validate pagination parameters
+    if (page < 1 || pageSize < 1) {
+      logger('getPaginatedVulnerabilityIds', 'error', 'Invalid pagination parameters', { page, pageSize });
+      return res.status(400).json({
+        error: 'Invalid pagination parameters',
+        details: 'Page and pageSize must be positive integers'
+      });
+    }
+    
+    // Fetch paginated vulnerability IDs from the smart contract
+    logger('getPaginatedVulnerabilityIds', 'info', 'Fetching paginated vulnerability IDs', { page, pageSize });
+    const paginatedIds = await contract.getPaginatedBaseVulnerabilityIds(page, pageSize);
+    logger('getPaginatedVulnerabilityIds', 'info', `Retrieved ${paginatedIds.length} vulnerability IDs for page ${page}`);
+    
+    // Get total count of IDs
+    const allIds = await contract.getAllBaseVulnerabilityIds();
+    const totalCount = allIds.length;
+    const totalPages = Math.ceil(totalCount / pageSize);
+    
+    // Convert bytes32 IDs to readable format if possible
+    const formattedIds = [];
+    for (const id of paginatedIds) {
+      try {
+        // Check if we have any existing vulnerabilities to extract text ID
+        const latestId = await contract.latestVersions(id);
+        const vulnerability = await contract.vulnerabilities(latestId);
+        
+        // Try to find any IPFS metadata with the original text ID
+        let textId = null;
+        if (vulnerability.ipfsCid) {
+          try {
+            const ipfsResponse = await axios.get(
+              `https://gateway.pinata.cloud/ipfs/${vulnerability.ipfsCid}`,
+              { timeout: 2000 }
+            );
+            if (ipfsResponse.data && ipfsResponse.data.id) {
+              textId = ipfsResponse.data.id;
+            }
+          } catch (ipfsError) {
+            // Continue without IPFS data
+          }
+        }
+        
+        formattedIds.push({
+          bytes32Id: id,
+          textId: textId,
+          latestVersionId: latestId
+        });
+      } catch (error) {
+        // Just include the bytes32 ID if we can't get additional info
+        formattedIds.push({
+          bytes32Id: id,
+          textId: null,
+          latestVersionId: null
+        });
+      }
+    }
+    
+    logger('getPaginatedVulnerabilityIds', 'success', 'Successfully retrieved paginated vulnerability IDs');
+    res.json({
+      pagination: {
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      },
+      ids: formattedIds
+    });
+    
+  } catch (error) {
+    logger('getPaginatedVulnerabilityIds', 'error', 'Error fetching paginated vulnerability IDs', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      error: 'Failed to retrieve paginated vulnerability IDs',
+      details: error.message
+    });
+  }
+});
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Health Check Endpoint
 // ───────────────────────────────────────────────────────────────────────────────
