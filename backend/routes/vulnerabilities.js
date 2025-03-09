@@ -168,17 +168,22 @@ router.get('/getAllVulnerabilities', async (req, res) => {
         const [vulnId, version, , title, description, ipfsCid, platform, isActive] = vuln;
 
         let ipfsMetadata = null;
+        let readableId = null; // Initialize a variable for the human-readable ID
         if (ipfsCid) {
           try {
             const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`);
             ipfsMetadata = response.data;
+            // Extract the human-readable ID from metadata if available
+            readableId = ipfsMetadata.id || null;
           } catch (error) {
             logger('getAllVulnerabilities', 'warn', 'IPFS fetch failed', { cid: ipfsCid });
           }
         }
 
         vulnerabilities.push({
-          baseId,
+          id: readableId || vulnId, // Use the human-readable ID if available, otherwise use the blockchain ID
+          vulnId, // Keep the blockchain-specific ID
+          baseId, // Keep the base ID for reference
           version: version.toString(),
           title,
           description,
