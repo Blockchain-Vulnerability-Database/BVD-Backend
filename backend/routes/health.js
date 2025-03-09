@@ -15,7 +15,6 @@ router.get('/', async (req, res) => {
       blockchain_connected: false,
       contract_accessible: false,
       ipfs_available: false,
-      database_connected: false,
       memory_usage: process.memoryUsage().heapUsed / 1024 / 1024
     },
     details: {
