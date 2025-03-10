@@ -205,6 +205,90 @@ router.get('/getAllVulnerabilities', async (req, res) => {
   }
 });
 
+// GET /vulnerabilities/getPaginatedAllVulnerabilities
+router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.pageSize) || 10;
+  
+  logger('getPaginatedAllVulnerabilities', 'info', 'Request received', { page, pageSize });
+  
+  try {
+    // Validate pagination parameters
+    if (page < 1 || pageSize < 1) {
+      logger('getPaginatedAllVulnerabilities', 'error', 'Invalid pagination parameters', { page, pageSize });
+      return res.status(400).json({
+        error: 'Invalid pagination parameters',
+        details: 'Page and pageSize must be positive integers'
+      });
+    }
+    
+    // Use the blockchain service to get paginated vulnerabilities with metadata
+    const result = await blockchain.getPaginatedAllVulnerabilities(page, pageSize);
+    
+    if (!result.vulnerabilities.length) {
+      return res.status(404).json({ error: 'No vulnerabilities found' });
+    }
+    
+    // Format the vulnerabilities with their full data and IPFS metadata
+    const formattedVulnerabilities = [];
+    
+    for (const item of result.vulnerabilities) {
+      // Skip entries where we couldn't get data
+      if (!item.data) continue;
+      
+      const [vulnId, version, , title, description, ipfsCid, platform, isActive] = item.data;
+      
+      let ipfsMetadata = null;
+      let readableId = null;
+      
+      if (ipfsCid) {
+        try {
+          const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`, 
+            { timeout: 3000 });
+          ipfsMetadata = response.data;
+          // Extract the human-readable ID from metadata if available
+          readableId = ipfsMetadata.id || null;
+        } catch (error) {
+          logger('getPaginatedAllVulnerabilities', 'warn', 'IPFS fetch failed', { 
+            cid: ipfsCid,
+            error: error.message 
+          });
+        }
+      }
+      
+      formattedVulnerabilities.push({
+        id: readableId || vulnId, // Use the human-readable ID if available, otherwise use the blockchain ID
+        vulnId, // Keep the blockchain-specific ID
+        baseId: item.baseId, // Keep the base ID for reference
+        version: version.toString(),
+        title,
+        description,
+        platform,
+        ipfsCid,
+        isActive,
+        metadata: ipfsMetadata
+      });
+    }
+
+    // Return formatted response with pagination metadata
+    res.json({
+      pagination: result.pagination,
+      count: formattedVulnerabilities.length,
+      vulnerabilities: formattedVulnerabilities
+    });
+
+  } catch (error) {
+    logger('getPaginatedAllVulnerabilities', 'error', 'Failed to retrieve', { 
+      error: error.message,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      error: 'Failed to retrieve paginated vulnerabilities',
+      details: error.message
+    });
+  }
+});
+
 // GET /vulnerabilities/getPaginatedVulnerabilityIds
 router.get('/getPaginatedVulnerabilityIds', async (req, res) => {
     const page = parseInt(req.query.page) || 1;

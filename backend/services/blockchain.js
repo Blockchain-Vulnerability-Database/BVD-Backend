@@ -211,6 +211,66 @@ const getPaginatedVulnerabilityIds = async (page, pageSize) => {
   }
 };
 
+/**
+ * Gets paginated vulnerabilities with full data
+ * 
+ * @param {number} page - Page number (1-based)
+ * @param {number} pageSize - Number of items per page
+ * @returns {Promise<Object>} Object with pagination info and full vulnerability data
+ */
+const getPaginatedAllVulnerabilities = async (page, pageSize) => {
+  try {
+    // Get paginated IDs
+    const paginatedIds = await getPaginatedIds(page, pageSize);
+    
+    // Get total count for pagination metadata
+    const allIds = await getAllBaseIds();
+    const totalCount = allIds.length;
+    const totalPages = Math.ceil(totalCount / pageSize);
+    
+    // For each ID in this page, get the full vulnerability data
+    const vulnerabilitiesData = [];
+    
+    for (const baseId of paginatedIds) {
+      try {
+        // Get the full vulnerability data for this ID
+        const vulnerabilityData = await getVulnerability(baseId);
+        
+        // Push to results array
+        vulnerabilitiesData.push({
+          baseId,
+          data: vulnerabilityData
+        });
+      } catch (error) {
+        logger('blockchain', 'error', 'Error fetching vulnerability data', {
+          baseId,
+          error: error.message
+        });
+        // If we can't get full data, push a minimal object
+        vulnerabilitiesData.push({
+          baseId,
+          data: null,
+          error: error.message
+        });
+      }
+    }
+    
+    return {
+      pagination: {
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      },
+      vulnerabilities: vulnerabilitiesData
+    };
+  } catch (error) {
+    return handleContractError(error, 'getPaginatedAllVulnerabilities');
+  }
+};
+
 module.exports = {
   addVulnerability,
   getVulnerability,
@@ -223,6 +283,7 @@ module.exports = {
   getLatestVersionId,
   getAllVulnerabilityIds,
   getPaginatedVulnerabilityIds,
+  getPaginatedAllVulnerabilities,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };
