@@ -106,7 +106,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
 
     try {
       const vulnerability = await blockchain.getVulnerability(baseIdBytes32);
-      const [vulnId, version, baseId, title, description, ipfsCid, platform, isActive] = vulnerability;
+      const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vulnerability;
 
       // Fetch IPFS data
       let ipfsData = null;
@@ -165,7 +165,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
     for (const baseId of allBaseIds) {
       try {
         const vuln = await blockchain.getVulnerability(baseId);
-        const [vulnId, version, , title, description, ipfsCid, platform, isActive] = vuln;
+        const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = vuln;
 
         let ipfsMetadata = null;
         let readableId = null; // Initialize a variable for the human-readable ID
@@ -181,8 +181,8 @@ router.get('/getAllVulnerabilities', async (req, res) => {
         }
 
         vulnerabilities.push({
-          id: readableId || vulnId, // Use the human-readable ID if available, otherwise use the blockchain ID
-          vulnId, // Keep the blockchain-specific ID
+          id: readableId || bvc_id, // Use the human-readable ID if available, otherwise use the blockchain ID
+          bvc_id, // Keep the blockchain-specific ID
           baseId, // Keep the base ID for reference
           version: version.toString(),
           title,
@@ -236,7 +236,7 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
       // Skip entries where we couldn't get data
       if (!item.data) continue;
       
-      const [vulnId, version, , title, description, ipfsCid, platform, isActive] = item.data;
+      const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = item.data;
       
       let ipfsMetadata = null;
       let readableId = null;
@@ -257,8 +257,8 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
       }
       
       formattedVulnerabilities.push({
-        id: readableId || vulnId, // Use the human-readable ID if available, otherwise use the blockchain ID
-        vulnId, // Keep the blockchain-specific ID
+        id: readableId || bvc_id, // Use the human-readable ID if available, otherwise use the blockchain ID
+        bvc_id, // Keep the blockchain-specific ID
         baseId: item.baseId, // Keep the base ID for reference
         version: version.toString(),
         title,
@@ -427,7 +427,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
     for (let i = 0; i < versionIds.length; i++) {
       try {
         const versionData = await blockchain.getVulnerabilityByVersion(baseIdBytes32, i + 1);
-        const [vulnId, version, , title, description, ipfsCid, platform, isActive] = versionData;
+        const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = versionData;
         
         versions.push({
           version: version.toString(),
@@ -462,7 +462,7 @@ router.get('/getVulnerabilityByVersion/:id/:version', async (req, res) => {
     const baseIdBytes32 = generateBaseId(id);
 
     const vulnerability = await blockchain.getVulnerabilityByVersion(baseIdBytes32, versionNum);
-    const [vulnId, vulnVersion, , title, description, ipfsCid, platform, isActive] = vulnerability;
+    const [bvc_id, vulnVersion, , title, description, ipfsCid, platform, isActive] = vulnerability;
 
     let ipfsData = null;
     if (ipfsCid) {
