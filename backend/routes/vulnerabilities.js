@@ -51,6 +51,20 @@ router.post('/addVulnerability', async (req, res) => {
       });
     }
 
+    // Validate discoveryDate format if provided
+    let discoveryDate = "";
+    if (vulnerabilityData.discoveryDate) {
+      const dateRegex = /^(\d{4}(-\d{2}-\d{2})?)$/;
+      if (!dateRegex.test(vulnerabilityData.discoveryDate)) {
+        logger('addVulnerability', 'error', 'Invalid discoveryDate format', { discoveryDate: vulnerabilityData.discoveryDate });
+        return res.status(400).json({
+          error: 'Invalid discoveryDate format',
+          details: 'discoveryDate must be in YYYY-MM-DD or YYYY format'
+        });
+      }
+      discoveryDate = vulnerabilityData.discoveryDate;
+    }
+
     // Upload to IPFS
     const fileBuffer = Buffer.from(JSON.stringify(vulnerabilityData, null, 2));
     const ipfsCid = await ipfs.uploadToIPFS(fileBuffer, `${vulnerabilityData.platform}-vulnerability.json`);
@@ -70,13 +84,14 @@ router.post('/addVulnerability', async (req, res) => {
         .substring(0, 64); // Ensure it's 32 bytes (64 hex chars)
     }
     
-    // Submit to blockchain
+    // Submit to blockchain with discoveryDate
     const tx = await blockchain.addVulnerability(
       baseIdBytes32,
       vulnerabilityData.title,
       vulnerabilityData.description,
       ipfsCid,
-      vulnerabilityData.platform
+      vulnerabilityData.platform,
+      discoveryDate
     );
 
     const receipt = await tx.wait();
@@ -142,7 +157,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
     try {
       // Call the updated blockchain method that uses BVC ID string directly
       const vulnerability = await blockchain.getVulnerability(id);
-      const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vulnerability;
+      const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vulnerability;
 
       // Fetch IPFS data
       let ipfsData = null;
@@ -161,6 +176,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
         title,
         description,
         platform,
+        discoveryDate,
         version: version.toString(),
         status: isActive ? 'active' : 'inactive',
         ipfs: {
@@ -207,7 +223,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
       try {
         // Use the BVC ID to get the vulnerability data
         const vuln = await blockchain.getVulnerability(bvcIds[i]);
-        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vuln;
 
         let ipfsMetadata = null;
         if (ipfsCid) {
@@ -226,6 +242,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
           title,
           description,
           platform,
+          discoveryDate,
           ipfsCid,
           isActive,
           metadata: ipfsMetadata
@@ -274,7 +291,7 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
     for (const bvcId of bvcIds) {
       try {
         const vuln = await blockchain.getVulnerability(bvcId);
-        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vuln;
         
         let ipfsMetadata = null;
         
@@ -298,6 +315,7 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
           title,
           description,
           platform,
+          discoveryDate,
           ipfsCid,
           isActive,
           metadata: ipfsMetadata
@@ -422,7 +440,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
     for (const bvcId of bvcIds) {
       try {
         const versionData = await blockchain.getVulnerability(bvcId);
-        const [, version, , title, description, ipfsCid, platform, isActive] = versionData;
+        const [, version, , title, description, ipfsCid, platform, discoveryDate, isActive] = versionData;
         
         versions.push({
           bvc_id: bvcId,
@@ -431,6 +449,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
           description,
           ipfsCid,
           platform,
+          discoveryDate,
           isActive
         });
       } catch (error) {

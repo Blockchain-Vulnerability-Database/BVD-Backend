@@ -28,19 +28,21 @@ const getVulnerability = async (bvcId) => {
   }
 };
 
-const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, platform) => {
+const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, platform, discoveryDate = "") => {
   try {
     const tx = await contractConfig.contract.addVulnerability(
       baseIdBytes32,
       title,
       description,
       ipfsCid,
-      platform
+      platform,
+      discoveryDate
     );
     
     logger('blockchain', 'info', 'Transaction submitted', {
       baseId: baseIdBytes32,
-      txHash: tx.hash
+      txHash: tx.hash,
+      discoveryDate: discoveryDate || 'Not provided'
     });
     
     return tx;
@@ -217,6 +219,20 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
 };
 
 /**
+ * Extract the year from a discovery date string
+ * 
+ * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
+ * @returns {Promise<number>} The extracted year or 0 if invalid/empty
+ */
+const extractYearFromDate = async (discoveryDate) => {
+  try {
+    return await contractConfig.contract.extractYearFromDate(discoveryDate);
+  } catch (error) {
+    return handleContractError(error, 'extractYearFromDate');
+  }
+};
+
+/**
  * Gets a vulnerability's counter for a specific platform and year
  * 
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
@@ -287,6 +303,7 @@ module.exports = {
   setCounter,
   transferOwnership,
   getEventsFromReceipt,
+  extractYearFromDate,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };
