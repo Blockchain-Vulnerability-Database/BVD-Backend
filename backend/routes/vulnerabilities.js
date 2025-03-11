@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const axios = require('axios');
 const { ethers } = require('ethers');
+const crypto = require('crypto');
 const { logger } = require('../services/logger');
 const blockchain = require('../services/blockchain');
 const ipfs = require('../services/ipfs');
@@ -56,7 +57,18 @@ router.post('/addVulnerability', async (req, res) => {
     logger('addVulnerability', 'info', 'IPFS upload success', { cid: ipfsCid });
 
     // Generate blockchain ID - we still need baseId for the smart contract
-    const baseIdBytes32 = vulnerabilityData.id ? generateBaseId(vulnerabilityData.id) : ethers.utils.randomBytes(32);
+    let baseIdBytes32;
+    if (vulnerabilityData.id) {
+      // Use provided ID if available
+      baseIdBytes32 = generateBaseId(vulnerabilityData.id);
+    } else {
+      // Generate deterministic baseId using Node.js crypto module
+      const dataString = `${vulnerabilityData.platform}-${vulnerabilityData.title}-${Date.now()}`;
+      baseIdBytes32 = '0x' + crypto.createHash('sha256')
+        .update(dataString)
+        .digest('hex')
+        .substring(0, 64); // Ensure it's 32 bytes (64 hex chars)
+    }
     
     // Submit to blockchain
     const tx = await blockchain.addVulnerability(
@@ -73,7 +85,6 @@ router.post('/addVulnerability', async (req, res) => {
     let bvcId = null;
     try {
       // Extract BVC ID from event logs (look for VulnerabilityRegistered event)
-      // This assumes your blockchain service can interpret the events
       const events = await blockchain.getEventsFromReceipt(receipt, 'VulnerabilityRegistered');
       if (events && events.length > 0) {
         bvcId = events[0].args.bvc_id;
