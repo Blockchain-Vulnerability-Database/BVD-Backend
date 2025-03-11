@@ -20,9 +20,9 @@ const handleContractError = (error, context = '') => {
   throw new Error(message);
 };
 
-const getVulnerability = async (baseIdBytes32) => {
+const getVulnerability = async (bvcId) => {
   try {
-    return await contractConfig.contract.getLatestVulnerability(baseIdBytes32);
+    return await contractConfig.contract.getVulnerability(bvcId);
   } catch (error) {
     return handleContractError(error, 'getVulnerability');
   }
@@ -49,27 +49,64 @@ const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, plat
   }
 };
 
+/**
+ * Extract events from a transaction receipt
+ * 
+ * @param {Object} receipt - Transaction receipt
+ * @param {string} eventName - Name of the event to look for
+ * @returns {Array} Array of event objects
+ */
+const getEventsFromReceipt = async (receipt, eventName) => {
+  try {
+    // Parse the logs using contract interface
+    const events = [];
+    for (const log of receipt.logs) {
+      try {
+        const parsedLog = contractConfig.contract.interface.parseLog(log);
+        if (parsedLog.name === eventName) {
+          events.push(parsedLog);
+        }
+      } catch (e) {
+        // Skip logs that can't be parsed or aren't from our contract
+      }
+    }
+    return events;
+  } catch (error) {
+    logger('blockchain', 'error', 'Failed to parse events', { error: error.message });
+    return [];
+  }
+};
+
 const getAllBaseIds = async () => {
   try {
-    return await contractConfig.contract.getAllBaseVulnerabilityIds();
+    // The updated contract returns both baseIds and bvcIds
+    const [baseIds, bvcIds] = await contractConfig.contract.getAllBaseVulnerabilityIds();
+    return { baseIds, bvcIds };
   } catch (error) {
     return handleContractError(error, 'getAllBaseIds');
   }
 };
 
-const getVulnerabilityVersions = async (baseIdBytes32) => {
+/**
+ * Get all BVC IDs
+ * 
+ * @returns {Promise<Array>} Array of string BVC IDs
+ */
+const getAllBvcIds = async () => {
   try {
-    return await contractConfig.contract.getVulnerabilityVersions(baseIdBytes32);
+    const [, bvcIds] = await contractConfig.contract.getAllBaseVulnerabilityIds();
+    return bvcIds;
   } catch (error) {
-    return handleContractError(error, 'getVulnerabilityVersions');
+    return handleContractError(error, 'getAllBvcIds');
   }
 };
 
-const getVulnerabilityByVersion = async (baseIdBytes32, versionNumber) => {
+const getVulnerabilityVersions = async (baseIdBytes32) => {
   try {
-    return await contractConfig.contract.getVulnerabilityByVersion(baseIdBytes32, versionNumber);
+    // The updated contract returns string BVC IDs for each version
+    return await contractConfig.contract.getVulnerabilityVersions(baseIdBytes32);
   } catch (error) {
-    return handleContractError(error, 'getVulnerabilityByVersion');
+    return handleContractError(error, 'getVulnerabilityVersions');
   }
 };
 
@@ -86,128 +123,33 @@ const setVulnerabilityStatus = async (baseIdBytes32, isActive) => {
   }
 };
 
-const getPaginatedIds = async (page, pageSize) => {
-  try {
-    return await contractConfig.contract.getPaginatedBaseVulnerabilityIds(page, pageSize);
-  } catch (error) {
-    return handleContractError(error, 'getPaginatedIds');
-  }
-};
-
-const getVulnerabilityDetails = async (versionId) => {
-  try {
-    return await contractConfig.contract.vulnerabilities(versionId);
-  } catch (error) {
-    return handleContractError(error, 'getVulnerabilityDetails');
-  }
-};
-
-const getLatestVersionId = async (baseIdBytes32) => {
-  try {
-    return await contractConfig.contract.latestVersions(baseIdBytes32);
-  } catch (error) {
-    return handleContractError(error, 'getLatestVersionId');
-  }
-};
-
 /**
- * Gets basic metadata for all vulnerability IDs
- * 
- * @returns {Promise<Array>} Array of vulnerability ID objects
- */
-const getAllVulnerabilityIds = async () => {
-  try {
-    // Get all base IDs from the contract
-    const baseIds = await getAllBaseIds();
-    
-    // For each ID, get the latest version ID and IPFS CID
-    const idsWithMetadata = [];
-    
-    for (const baseId of baseIds) {
-      try {
-        // Get the latest version ID for this base ID
-        const latestVersionId = await getLatestVersionId(baseId);
-        
-        // Get the vulnerability details
-        const details = await getVulnerabilityDetails(latestVersionId);
-        
-        idsWithMetadata.push({
-          bytes32Id: baseId,
-          latestVersionId: latestVersionId,
-          ipfsCid: details.ipfsCid || null
-        });
-      } catch (error) {
-        // If we can't get details, just include the base ID
-        idsWithMetadata.push({
-          bytes32Id: baseId,
-          latestVersionId: null,
-          ipfsCid: null
-        });
-      }
-    }
-    
-    return idsWithMetadata;
-  } catch (error) {
-    return handleContractError(error, 'getAllVulnerabilityIds');
-  }
-};
-
-/**
- * Gets paginated vulnerability IDs with basic metadata
+ * Get paginated BVC IDs
  * 
  * @param {number} page - Page number (1-based)
  * @param {number} pageSize - Number of items per page
- * @returns {Promise<Object>} Object with pagination info and vulnerability ID data
+ * @returns {Promise<Array>} Array of string BVC IDs
  */
 const getPaginatedVulnerabilityIds = async (page, pageSize) => {
   try {
-    // Get paginated IDs
-    const paginatedIds = await getPaginatedIds(page, pageSize);
-    
-    // Get total count for pagination metadata
-    const allIds = await getAllBaseIds();
-    const totalCount = allIds.length;
-    const totalPages = Math.ceil(totalCount / pageSize);
-    
-    // For each ID, get the latest version ID and IPFS CID
-    const idsWithMetadata = [];
-    
-    for (const baseId of paginatedIds) {
-      try {
-        // Get the latest version ID for this base ID
-        const latestVersionId = await getLatestVersionId(baseId);
-        
-        // Get the vulnerability details
-        const details = await getVulnerabilityDetails(latestVersionId);
-        
-        idsWithMetadata.push({
-          bytes32Id: baseId,
-          latestVersionId: latestVersionId,
-          ipfsCid: details.ipfsCid || null
-        });
-      } catch (error) {
-        // If we can't get details, just include the base ID
-        idsWithMetadata.push({
-          bytes32Id: baseId,
-          latestVersionId: null,
-          ipfsCid: null
-        });
-      }
-    }
-    
-    return {
-      pagination: {
-        page,
-        pageSize,
-        totalCount,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      },
-      ids: idsWithMetadata
-    };
+    // The updated contract returns BVC IDs directly
+    return await contractConfig.contract.getPaginatedVulnerabilityIds(page, pageSize);
   } catch (error) {
     return handleContractError(error, 'getPaginatedVulnerabilityIds');
+  }
+};
+
+/**
+ * Get total number of vulnerabilities
+ * 
+ * @returns {Promise<number>} Total count of vulnerabilities
+ */
+const getTotalVulnerabilitiesCount = async () => {
+  try {
+    const [baseIds] = await contractConfig.contract.getAllBaseVulnerabilityIds();
+    return baseIds.length;
+  } catch (error) {
+    return handleContractError(error, 'getTotalVulnerabilitiesCount');
   }
 };
 
@@ -220,35 +162,38 @@ const getPaginatedVulnerabilityIds = async (page, pageSize) => {
  */
 const getPaginatedAllVulnerabilities = async (page, pageSize) => {
   try {
-    // Get paginated IDs
-    const paginatedIds = await getPaginatedIds(page, pageSize);
+    // Get paginated BVC IDs
+    const bvcIds = await getPaginatedVulnerabilityIds(page, pageSize);
     
     // Get total count for pagination metadata
-    const allIds = await getAllBaseIds();
-    const totalCount = allIds.length;
+    const totalCount = await getTotalVulnerabilitiesCount();
     const totalPages = Math.ceil(totalCount / pageSize);
     
     // For each ID in this page, get the full vulnerability data
     const vulnerabilitiesData = [];
     
-    for (const baseId of paginatedIds) {
+    for (const bvcId of bvcIds) {
       try {
-        // Get the full vulnerability data for this ID
-        const vulnerabilityData = await getVulnerability(baseId);
+        // Get the full vulnerability data for this BVC ID
+        const vulnerabilityData = await getVulnerability(bvcId);
+        
+        // Extract the baseId from the response
+        const baseId = vulnerabilityData[2]; // Position in return tuple
         
         // Push to results array
         vulnerabilitiesData.push({
+          bvcId,
           baseId,
           data: vulnerabilityData
         });
       } catch (error) {
         logger('blockchain', 'error', 'Error fetching vulnerability data', {
-          baseId,
+          bvcId,
           error: error.message
         });
         // If we can't get full data, push a minimal object
         vulnerabilitiesData.push({
-          baseId,
+          bvcId,
           data: null,
           error: error.message
         });
@@ -271,19 +216,77 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
   }
 };
 
+/**
+ * Gets a vulnerability's counter for a specific platform and year
+ * 
+ * @param {string} platform - Platform code (e.g., "ETH", "SOL")
+ * @param {number} year - Year (e.g., 2023)
+ * @returns {Promise<number>} Current counter value
+ */
+const getCurrentCounter = async (platform, year) => {
+  try {
+    return await contractConfig.contract.getCurrentCounter(platform, year);
+  } catch (error) {
+    return handleContractError(error, 'getCurrentCounter');
+  }
+};
+
+/**
+ * Sets a vulnerability's counter for a specific platform and year (admin only)
+ * 
+ * @param {string} platform - Platform code (e.g., "ETH", "SOL")
+ * @param {number} year - Year (e.g., 2023)
+ * @param {number} value - New counter value
+ * @returns {Promise<Object>} Transaction object
+ */
+const setCounter = async (platform, year, value) => {
+  try {
+    const tx = await contractConfig.contract.setCounter(platform, year, value);
+    logger('blockchain', 'info', 'Counter update submitted', {
+      platform,
+      year,
+      value,
+      txHash: tx.hash
+    });
+    return tx;
+  } catch (error) {
+    return handleContractError(error, 'setCounter');
+  }
+};
+
+/**
+ * Transfers ownership of the contract (admin only)
+ * 
+ * @param {string} newOwner - Address of the new owner
+ * @returns {Promise<Object>} Transaction object
+ */
+const transferOwnership = async (newOwner) => {
+  try {
+    const tx = await contractConfig.contract.transferOwnership(newOwner);
+    logger('blockchain', 'info', 'Ownership transfer submitted', {
+      newOwner,
+      txHash: tx.hash
+    });
+    return tx;
+  } catch (error) {
+    return handleContractError(error, 'transferOwnership');
+  }
+};
+
 module.exports = {
   addVulnerability,
   getVulnerability,
   getAllBaseIds,
+  getAllBvcIds,
   getVulnerabilityVersions,
-  getVulnerabilityByVersion,
   setVulnerabilityStatus,
-  getPaginatedIds,
-  getVulnerabilityDetails,
-  getLatestVersionId,
-  getAllVulnerabilityIds,
   getPaginatedVulnerabilityIds,
+  getTotalVulnerabilitiesCount,
   getPaginatedAllVulnerabilities,
+  getCurrentCounter,
+  setCounter,
+  transferOwnership,
+  getEventsFromReceipt,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };

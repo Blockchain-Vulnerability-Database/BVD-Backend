@@ -20,10 +20,11 @@ A blockchain-powered backend service for recording, tracking, and retrieving vul
       - [GET /getVulnerability/:id](#get-getvulnerabilityid)
       - [GET /getAllVulnerabilities](#get-getallvulnerabilities)
       - [GET /getVulnerabilityVersions/:id](#get-getvulnerabilityversionsid)
-      - [GET /getVulnerabilityByVersion/:id/:version](#get-getvulnerabilitybyversionidversion)
       - [GET /getAllVulnerabilityIds](#get-getallvulnerabilityids)
       - [GET /getPaginatedVulnerabilityIds](#get-getpaginatedvulnerabilityids)
       - [POST /setVulnerabilityStatus](#post-setvulnerabilitystatus)
+      - [GET /getCurrentCounter](#get-getcurrentcounter)
+      - [POST /setCounter](#post-setcounter)
     - [Health Endpoints](#health-endpoints)
       - [GET /health](#get-health)
   - [Middleware](#middleware)
@@ -87,19 +88,23 @@ Provides blockchain interaction functionality using ethers.js.
 
 **Functions:**
 - `validateNetwork()`: Checks if the blockchain network is accessible
-- `generateBytes32Id(textId)`: Generates a bytes32 ID from a text identifier
-- `getLatestVulnerability(baseId)`: Gets the latest version of a vulnerability
-- `getVulnerabilityByVersion(baseId, version)`: Gets a specific version of a vulnerability
-- `getVulnerabilityVersions(baseId)`: Gets all versions for a vulnerability
-- `getAllBaseVulnerabilityIds()`: Gets all vulnerability base IDs
-- `getPaginatedBaseVulnerabilityIds(page, pageSize)`: Gets paginated vulnerability IDs
+- `generateBaseId(textId)`: Generates a bytes32 ID from a text identifier
+- `getVulnerability(bvcId)`: Gets vulnerability details by BVC ID
+- `getVulnerabilityVersions(baseId)`: Gets all versions for a vulnerability (returns BVC IDs)
+- `getAllBaseIds()`: Gets all vulnerability base IDs and their corresponding BVC IDs
+- `getAllBvcIds()`: Gets all vulnerability BVC IDs
+- `getPaginatedVulnerabilityIds(page, pageSize)`: Gets paginated BVC IDs
+- `getTotalVulnerabilitiesCount()`: Gets total number of vulnerabilities
 - `setVulnerabilityStatus(baseId, isActive)`: Sets vulnerability status
 - `addVulnerability(baseId, title, description, ipfsCid, platform)`: Adds a new vulnerability
+- `getEventsFromReceipt(receipt, eventName)`: Extracts events from a transaction receipt
+- `getCurrentCounter(platform, year)`: Gets the current counter for a platform/year
+- `setCounter(platform, year, value)`: Sets counter for a platform/year (admin only)
+- `transferOwnership(newOwner)`: Transfers contract ownership (admin only)
 
 **Exported Variables:**
 - `provider`: ethers.js JSON RPC provider
-- `wallet`: ethers.js wallet instance
-- `contract`: ethers.js contract instance
+- `contractInstance`: ethers.js contract instance
 
 ### IPFS Service
 
@@ -142,14 +147,12 @@ Adds a new vulnerability record.
 {
   "message": "Vulnerability recorded",
   "identifiers": {
-    "text": "BVC-SOL-004",
+    "bvcId": "BVC-SOL-2023-001",
     "bytes32BaseId": "0x..."
   },
-  "platform": "web",
   "blockchain": {
     "txHash": "0x...",
-    "block": 123456,
-    "contract": "0x..."
+    "block": 123456
   },
   "ipfs": {
     "cid": "Qm...",
@@ -166,37 +169,32 @@ curl -X POST http://localhost:3000/addVulnerability \
 ```
 
 #### GET /getVulnerability/:id
-Gets the latest version of a vulnerability by ID.
+Gets vulnerability information by BVC ID.
 
 **Parameters:**
-- `id`: Vulnerability ID in BVC-XXX-000 format
+- `id`: Vulnerability BVC ID (e.g., BVC-SOL-2023-001)
 
 **Response:**
 ```json
 {
-  "id": "BVC-SOL-004",
+  "bvc_id": "BVC-SOL-2023-001",
   "bytes32BaseId": "0x...",
-  "bytes32VersionId": "0x...",
   "title": "Vulnerability Title",
   "description": "Vulnerability Description",
-  "platform": "web",
+  "platform": "SOL",
   "version": "1",
   "status": "active",
   "ipfs": {
     "cid": "Qm...",
     "data": {...},
     "url": "https://gateway.pinata.cloud/ipfs/Qm..."
-  },
-  "blockchain": {
-    "contract": "0x...",
-    "network": {...}
   }
 }
 ```
 
 **cURL Example:**
 ```bash
-curl -X GET http://localhost:3000/getVulnerability/BVC-SOL-004
+curl -X GET http://localhost:3000/getVulnerability/BVC-SOL-2023-001
 ```
 
 #### GET /getAllVulnerabilities
@@ -205,8 +203,21 @@ Gets all vulnerabilities.
 **Response:**
 ```json
 {
-  "status": "success",
-  "vulnerabilities": [...]
+  "count": 10,
+  "vulnerabilities": [
+    {
+      "bvc_id": "BVC-SOL-2023-001",
+      "baseId": "0x...",
+      "version": "1",
+      "title": "Vulnerability Title",
+      "description": "Vulnerability Description",
+      "platform": "SOL",
+      "ipfsCid": "Qm...",
+      "isActive": true,
+      "metadata": {...}
+    },
+    ...
+  ]
 }
 ```
 
@@ -219,66 +230,52 @@ curl -X GET http://localhost:3000/vulnerabilities/getAllVulnerabilities
 Gets version history for a vulnerability.
 
 **Parameters:**
-- `id`: Vulnerability ID in BVC-XXX-000 format
+- `id`: Vulnerability BVC ID (e.g., BVC-SOL-2023-001) or base ID
 
 **Response:**
 ```json
 {
-  "id": "BVC-SOL-004",
-  "baseId": "0x...",
-  "versionCount": 2,
-  "versions": [...]
+  "id": "BVC-SOL-2023-001",
+  "versions": [
+    {
+      "bvc_id": "BVC-SOL-2023-001",
+      "version": "1",
+      "title": "Vulnerability Title v1",
+      "description": "Initial description",
+      "ipfsCid": "Qm...",
+      "platform": "SOL",
+      "isActive": false
+    },
+    {
+      "bvc_id": "BVC-SOL-2023-001-v2",
+      "version": "2",
+      "title": "Vulnerability Title v2",
+      "description": "Updated description",
+      "ipfsCid": "Qm...",
+      "platform": "SOL",
+      "isActive": true
+    }
+  ]
 }
 ```
 
 **cURL Example:**
 ```bash
-curl -X GET http://localhost:3000/vulnerabilities/getVulnerabilityVersions/BVC-SOL-004
-```
-
-#### GET /getVulnerabilityByVersion/:id/:version
-Gets a specific version of a vulnerability.
-
-**Parameters:**
-- `id`: Vulnerability ID in BVC-XXX-000 format
-- `version`: Version number
-
-**Response:**
-```json
-{
-  "id": "BVC-SOL-004",
-  "bytes32BaseId": "0x...",
-  "bytes32VersionId": "0x...",
-  "title": "Vulnerability Title",
-  "description": "Vulnerability Description",
-  "platform": "web",
-  "version": "1",
-  "status": "active",
-  "ipfs": {
-    "cid": "Qm...",
-    "data": {...},
-    "url": "https://gateway.pinata.cloud/ipfs/Qm..."
-  },
-  "blockchain": {
-    "contract": "0x...",
-    "network": {...}
-  }
-}
-```
-
-**cURL Example:**
-```bash
-curl -X GET http://localhost:3000/vulnerabilities/getVulnerabilityByVersion/BVC-SOL-004/1
+curl -X GET http://localhost:3000/vulnerabilities/getVulnerabilityVersions/BVC-SOL-2023-001
 ```
 
 #### GET /getAllVulnerabilityIds
-Gets all vulnerability IDs.
+Gets all vulnerability BVC IDs.
 
 **Response:**
 ```json
 {
   "count": 10,
-  "ids": [...]
+  "bvcIds": [
+    "BVC-SOL-2023-001",
+    "BVC-ETH-2023-001",
+    ...
+  ]
 }
 ```
 
@@ -288,7 +285,7 @@ curl -X GET http://localhost:3000/vulnerabilities/getAllVulnerabilityIds
 ```
 
 #### GET /getPaginatedVulnerabilityIds
-Gets paginated vulnerability IDs.
+Gets paginated vulnerability BVC IDs.
 
 **Query Parameters:**
 - `page`: Page number (default: 1)
@@ -300,12 +297,13 @@ Gets paginated vulnerability IDs.
   "pagination": {
     "page": 1,
     "pageSize": 10,
-    "totalCount": 25,
-    "totalPages": 3,
-    "hasNextPage": true,
-    "hasPrevPage": false
+    "total": 25
   },
-  "ids": [...]
+  "bvcIds": [
+    "BVC-SOL-2023-001",
+    "BVC-ETH-2023-001",
+    ...
+  ]
 }
 ```
 
@@ -320,7 +318,7 @@ Sets the status of a vulnerability.
 **Request Body:**
 ```json
 {
-  "id": "BVC-SOL-004",
+  "id": "BVC-SOL-2023-001",
   "isActive": true
 }
 ```
@@ -328,14 +326,9 @@ Sets the status of a vulnerability.
 **Response:**
 ```json
 {
-  "message": "Vulnerability status updated to active",
-  "baseId": "0x...",
-  "isActive": true,
-  "blockchain": {
-    "txHash": "0x...",
-    "block": 123456,
-    "contract": "0x..."
-  }
+  "message": "Status updated to active",
+  "txHash": "0x...",
+  "block": 123456
 }
 ```
 
@@ -343,7 +336,58 @@ Sets the status of a vulnerability.
 ```bash
 curl -X POST http://localhost:3000/setVulnerabilityStatus \
   -H "Content-Type: application/json" \
-  -d '{"id": "BVC-SOL-004", "isActive": true}'
+  -d '{"id": "BVC-SOL-2023-001", "isActive": true}'
+```
+
+#### GET /getCurrentCounter
+Gets the current counter for a platform and year.
+
+**Query Parameters:**
+- `platform`: Platform code (e.g., "SOL", "ETH")
+- `year`: Year (e.g., 2023)
+
+**Response:**
+```json
+{
+  "platform": "SOL",
+  "year": 2023,
+  "counter": 5
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET "http://localhost:3000/getCurrentCounter?platform=SOL&year=2023"
+```
+
+#### POST /setCounter
+Sets the counter for a platform and year (admin only).
+
+**Request Body:**
+```json
+{
+  "platform": "SOL",
+  "year": 2023,
+  "value": 10
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Counter updated",
+  "platform": "SOL",
+  "year": 2023,
+  "value": 10,
+  "txHash": "0x..."
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:3000/setCounter \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "SOL", "year": 2023, "value": 10}'
 ```
 
 ### Health Endpoints

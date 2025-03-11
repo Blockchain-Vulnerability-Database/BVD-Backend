@@ -1,4 +1,3 @@
-
 # Blockchain Vulnerability Database API Documentation
 
 ## Base URL
@@ -46,15 +45,22 @@ Check the health of the server, blockchain, and IPFS connection.
 ---
 
 ### 3. **POST /addVulnerability**
-Add a new vulnerability to the database and smart contract.
+Add a new vulnerability to the database and smart contract. The BVC ID will be auto-generated in the format `BVC-[PLATFORM]-[YEAR]-[ID]`.
 
 #### Request Body
 ```json
 {
-  "id": "BVC-TEST-001",
+  "filePath": "/path/to/vulnerability.json"
+}
+```
+
+#### Vulnerability JSON Format
+```json
+{
   "title": "Test Vulnerability",
   "description": "A sample vulnerability for testing.",
-  "metadata": "/path/to/metadata.json"
+  "severity": "high",
+  "platform": "ETH"
 }
 ```
 
@@ -62,17 +68,26 @@ Add a new vulnerability to the database and smart contract.
 - **201 Created**
 ```json
 {
-  "message": "Vulnerability added successfully.",
-  "receipt": { ...transactionReceipt }
+  "message": "Vulnerability recorded",
+  "identifiers": {
+    "bvcId": "BVC-ETH-2023-001",
+    "bytes32BaseId": "0x..."
+  },
+  "blockchain": {
+    "txHash": "0x...",
+    "block": 123456
+  },
+  "ipfs": {
+    "cid": "Qm...",
+    "url": "https://gateway.pinata.cloud/ipfs/Qm..."
+  }
 }
 ```
 - **400 Bad Request**
 ```json
 {
-  "errors": [
-    { "msg": "id is required and must be a string", "path": "id" },
-    { "msg": "metadata file path is invalid or does not exist", "path": "metadata" }
-  ]
+  "error": "Invalid platform format",
+  "details": "Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)"
 }
 ```
 
@@ -82,26 +97,30 @@ Add a new vulnerability to the database and smart contract.
 Retrieve details for a specific vulnerability.
 
 #### Path Parameters
-- `id`: The unique ID of the vulnerability (e.g., `BVC-TEST-001`).
+- `id`: The BVC ID of the vulnerability (e.g., `BVC-ETH-2023-001`).
 
 #### Response
 - **200 OK**
 ```json
 {
-  "status": "success",
-  "vulnerability": {
-    "id": "BVC-TEST-001",
-    "title": "Test Vulnerability",
-    "description": "A sample vulnerability for testing.",
-    "ipfsCid": "Qm...",
-    "isActive": true
+  "bvc_id": "BVC-ETH-2023-001",
+  "bytes32BaseId": "0x...",
+  "title": "Test Vulnerability",
+  "description": "A sample vulnerability for testing.",
+  "platform": "ETH",
+  "version": "1",
+  "status": "active",
+  "ipfs": {
+    "cid": "Qm...",
+    "data": {...},
+    "url": "https://gateway.pinata.cloud/ipfs/Qm..."
   }
 }
 ```
 - **404 Not Found**
 ```json
 {
-  "error": "Vulnerability does not exist"
+  "error": "Vulnerability not found"
 }
 ```
 
@@ -113,7 +132,7 @@ Update the active status of a vulnerability.
 #### Request Body
 ```json
 {
-  "id": "BVC-TEST-001",
+  "id": "BVC-ETH-2023-001",
   "isActive": false
 }
 ```
@@ -122,16 +141,15 @@ Update the active status of a vulnerability.
 - **200 OK**
 ```json
 {
-  "message": "Vulnerability status updated successfully",
-  "receipt": { ...transactionReceipt }
+  "message": "Status updated to inactive",
+  "txHash": "0x...",
+  "block": 123456
 }
 ```
 - **400 Bad Request**
 ```json
 {
-  "errors": [
-    { "msg": "isActive must be a boolean value", "path": "isActive" }
-  ]
+  "error": "Invalid request parameters"
 }
 ```
 
@@ -144,14 +162,18 @@ Retrieve all vulnerabilities stored in the database.
 - **200 OK**
 ```json
 {
-  "status": "success",
+  "count": 10,
   "vulnerabilities": [
     {
-      "id": "BVC-TEST-001",
+      "bvc_id": "BVC-ETH-2023-001",
+      "baseId": "0x...",
+      "version": "1",
       "title": "Test Vulnerability",
       "description": "A sample vulnerability for testing.",
+      "platform": "ETH",
       "ipfsCid": "Qm...",
-      "isActive": true
+      "isActive": true,
+      "metadata": {...}
     }
   ]
 }
@@ -159,8 +181,8 @@ Retrieve all vulnerabilities stored in the database.
 
 ---
 
-### 7. **GET /getVulnerabilitiesPaginated**
-Retrieve vulnerabilities in a paginated format.
+### 7. **GET /getPaginatedVulnerabilityIds**
+Retrieve vulnerability IDs in a paginated format.
 
 #### Query Parameters
 - `page`: (integer) The page number (e.g., `1`).
@@ -170,101 +192,141 @@ Retrieve vulnerabilities in a paginated format.
 - **200 OK**
 ```json
 {
-  "status": "success",
-  "vulnerabilities": [
+  "pagination": {
+    "page": 1,
+    "pageSize": 10,
+    "total": 25
+  },
+  "bvcIds": [
+    "BVC-ETH-2023-001",
+    "BVC-SOL-2023-001",
+    "BVC-MULTI-2023-001"
+  ]
+}
+```
+- **400 Bad Request**
+```json
+{
+  "error": "Invalid pagination parameters",
+  "details": "Page and pageSize must be positive integers"
+}
+```
+
+---
+
+### 8. **GET /getVulnerabilityVersions/:id**
+Retrieve all versions of a specific vulnerability.
+
+#### Path Parameters
+- `id`: The BVC ID or base ID of the vulnerability (e.g., `BVC-ETH-2023-001`).
+
+#### Response
+- **200 OK**
+```json
+{
+  "id": "BVC-ETH-2023-001",
+  "versions": [
     {
-      "id": "BVC-TEST-001",
-      "title": "Test Vulnerability",
-      "description": "A sample vulnerability for testing.",
+      "bvc_id": "BVC-ETH-2023-001",
+      "version": "1",
+      "title": "Test Vulnerability v1",
+      "description": "Initial description",
       "ipfsCid": "Qm...",
+      "platform": "ETH",
+      "isActive": false
+    },
+    {
+      "bvc_id": "BVC-ETH-2023-001-v2",
+      "version": "2",
+      "title": "Test Vulnerability v2",
+      "description": "Updated description",
+      "ipfsCid": "Qm...",
+      "platform": "ETH",
       "isActive": true
     }
   ]
 }
 ```
-- **400 Bad Request**
+- **404 Not Found**
 ```json
 {
-  "errors": [
-    { "msg": "Page must be a positive integer", "path": "page" }
+  "error": "Vulnerability not found"
+}
+```
+
+---
+
+### 9. **GET /getAllVulnerabilityIds**
+Retrieve all vulnerability IDs.
+
+#### Response
+- **200 OK**
+```json
+{
+  "count": 3,
+  "bvcIds": [
+    "BVC-ETH-2023-001",
+    "BVC-SOL-2023-001",
+    "BVC-MULTI-2023-001"
   ]
 }
 ```
 
 ---
 
-### 8. **GET /getFileContentsFromIPFS/:cid**
-Retrieve metadata from IPFS for a given CID.
+### 10. **GET /getCurrentCounter**
+Get the current counter for a specific platform and year.
 
-#### Path Parameters
-- `cid`: The IPFS CID of the file (e.g., `Qm...`).
-
-#### Response
-- **200 OK**
-```json
-{
-  "id": "BVC-TEST-001",
-  "title": "Test Vulnerability",
-  ...
-}
-```
-- **500 Internal Server Error**
-```json
-{
-  "status": "error",
-  "message": "Could not retrieve file from IPFS for CID: Qm..."
-}
-```
-
----
-
-### 9. **DELETE /deleteFileFromIPFSIfUnreferenced/:cid**
-Delete an unreferenced file from IPFS.
-
-#### Path Parameters
-- `cid`: The IPFS CID to unpin (e.g., `Qm...`).
+#### Query Parameters
+- `platform`: (string) The platform code (e.g., `ETH`).
+- `year`: (integer) The year (e.g., `2023`).
 
 #### Response
 - **200 OK**
 ```json
 {
-  "status": "success",
-  "message": "CID Qm... was not in the contract and has been unpinned."
+  "platform": "ETH",
+  "year": 2023,
+  "counter": 5
 }
 ```
 - **400 Bad Request**
 ```json
 {
-  "status": "error",
-  "message": "CID Qm... is still referenced in the contract."
+  "error": "Invalid platform format",
+  "details": "Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)"
 }
 ```
 
 ---
 
-### 10. **GET /getHashAndCid/:id**
-Retrieve the file hash and CID for a vulnerability ID.
+### 11. **POST /setCounter**
+Set the counter for a specific platform and year (admin only).
 
-#### Path Parameters
-- `id`: The unique ID of the vulnerability (e.g., `BVC-TEST-001`).
+#### Request Body
+```json
+{
+  "platform": "ETH",
+  "year": 2023,
+  "value": 10
+}
+```
 
 #### Response
 - **200 OK**
 ```json
 {
-  "status": "success",
-  "data": {
-    "id": "BVC-TEST-001",
-    "cid": "Qm...",
-    "fileHash": "abcd1234..."
-  }
+  "message": "Counter updated",
+  "platform": "ETH",
+  "year": 2023,
+  "value": 10,
+  "txHash": "0x..."
 }
 ```
-- **404 Not Found**
+- **401 Unauthorized**
 ```json
 {
-  "status": "error",
-  "message": "No CID found for ID BVC-TEST-001"
+  "error": "Caller is not the owner"
 }
 ```
 
@@ -281,6 +343,7 @@ Retrieve the file hash and CID for a vulnerability ID.
 
 ## Error Handling
 - **400 Bad Request**: Input validation errors.
+- **401 Unauthorized**: Authentication errors.
 - **404 Not Found**: Resource not found.
 - **500 Internal Server Error**: General server errors.
 
@@ -295,3 +358,18 @@ Retrieve the file hash and CID for a vulnerability ID.
 ## CORS
 - Allowed Origins: `https://your-frontend-domain.com`
 - Allowed Methods: `GET, POST`
+
+---
+
+## BVC ID Format
+All vulnerability IDs follow the format: `BVC-[PLATFORM]-[YEAR]-[ID]`
+
+- `BVC`: Fixed prefix
+- `[PLATFORM]`: 2-5 uppercase letters (e.g., ETH, SOL, MULTI)
+- `[YEAR]`: 4-digit year (e.g., 2023)
+- `[ID]`: 3-5 digit sequential number (e.g., 001, 12345)
+
+Examples:
+- `BVC-ETH-2023-001`
+- `BVC-SOL-2023-001`
+- `BVC-MULTI-2023-001`

@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const axios = require('axios');
 const { ethers } = require('ethers');
+const crypto = require('crypto');
 const { logger } = require('../services/logger');
 const blockchain = require('../services/blockchain');
 const ipfs = require('../services/ipfs');
@@ -33,20 +34,41 @@ router.post('/addVulnerability', async (req, res) => {
     }
 
     // Validate required fields
-    const requiredFields = ['id', 'title', 'description', 'severity', 'platform'];
+    const requiredFields = ['title', 'description', 'severity', 'platform'];
     const missingFields = requiredFields.filter(f => !vulnerabilityData[f]);
     if (missingFields.length > 0) {
       logger('addVulnerability', 'error', 'Missing fields', { missing: missingFields });
       return res.status(400).json({ error: 'Missing required fields', missing: missingFields });
     }
 
+    // Validate platform format (2-5 uppercase letters)
+    const platformRegex = /^[A-Z]{2,5}$/;
+    if (!platformRegex.test(vulnerabilityData.platform)) {
+      logger('addVulnerability', 'error', 'Invalid platform format', { platform: vulnerabilityData.platform });
+      return res.status(400).json({ 
+        error: 'Invalid platform format', 
+        details: 'Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)' 
+      });
+    }
+
     // Upload to IPFS
     const fileBuffer = Buffer.from(JSON.stringify(vulnerabilityData, null, 2));
-    const ipfsCid = await ipfs.uploadToIPFS(fileBuffer, `${vulnerabilityData.id}.json`);
+    const ipfsCid = await ipfs.uploadToIPFS(fileBuffer, `${vulnerabilityData.platform}-vulnerability.json`);
     logger('addVulnerability', 'info', 'IPFS upload success', { cid: ipfsCid });
 
-    // Generate blockchain ID
-    const baseIdBytes32 = generateBaseId(vulnerabilityData.id);
+    // Generate blockchain ID - we still need baseId for the smart contract
+    let baseIdBytes32;
+    if (vulnerabilityData.id) {
+      // Use provided ID if available
+      baseIdBytes32 = generateBaseId(vulnerabilityData.id);
+    } else {
+      // Generate deterministic baseId using Node.js crypto module
+      const dataString = `${vulnerabilityData.platform}-${vulnerabilityData.title}-${Date.now()}`;
+      baseIdBytes32 = '0x' + crypto.createHash('sha256')
+        .update(dataString)
+        .digest('hex')
+        .substring(0, 64); // Ensure it's 32 bytes (64 hex chars)
+    }
     
     // Submit to blockchain
     const tx = await blockchain.addVulnerability(
@@ -58,15 +80,29 @@ router.post('/addVulnerability', async (req, res) => {
     );
 
     const receipt = await tx.wait();
+    
+    // Get the BVC ID from the transaction receipt
+    let bvcId = null;
+    try {
+      // Extract BVC ID from event logs (look for VulnerabilityRegistered event)
+      const events = await blockchain.getEventsFromReceipt(receipt, 'VulnerabilityRegistered');
+      if (events && events.length > 0) {
+        bvcId = events[0].args.bvc_id;
+      }
+    } catch (eventError) {
+      logger('addVulnerability', 'warn', 'Failed to extract BVC ID from events', { error: eventError.message });
+    }
+
     logger('addVulnerability', 'info', 'Blockchain confirmed', { 
       block: receipt.blockNumber,
-      txHash: tx.hash 
+      txHash: tx.hash,
+      bvcId: bvcId
     });
 
     res.status(201).json({
       message: 'Vulnerability recorded',
       identifiers: {
-        text: vulnerabilityData.id,
+        bvcId: bvcId, // The auto-generated BVC ID
         bytes32BaseId: baseIdBytes32
       },
       blockchain: {
@@ -101,11 +137,11 @@ router.get('/getVulnerability/:id', async (req, res) => {
   logger('getVulnerability', 'info', 'Request received', { id });
   
   try {
-    validateVulnerabilityId(id);
-    const baseIdBytes32 = generateBaseId(id);
-
+    // No need to validate vulnerability ID format, as we now accept the BVC ID directly
+    
     try {
-      const vulnerability = await blockchain.getVulnerability(baseIdBytes32);
+      // Call the updated blockchain method that uses BVC ID string directly
+      const vulnerability = await blockchain.getVulnerability(id);
       const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vulnerability;
 
       // Fetch IPFS data
@@ -120,7 +156,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
       }
 
       res.json({
-        id,
+        bvc_id,
         bytes32BaseId: baseId,
         title,
         description,
@@ -158,32 +194,34 @@ router.get('/getVulnerability/:id', async (req, res) => {
 // GET /vulnerabilities/getAllVulnerabilities
 router.get('/getAllVulnerabilities', async (req, res) => {
   try {
-    const allBaseIds = await blockchain.getAllBaseIds();
-    if (!allBaseIds.length) return res.status(404).json({ error: 'No vulnerabilities found' });
+    // Call the updated method that returns both base IDs and BVC IDs
+    const result = await blockchain.getAllBaseIds();
+    const { baseIds, bvcIds } = result;
+    
+    if (!baseIds || !baseIds.length) {
+      return res.status(404).json({ error: 'No vulnerabilities found' });
+    }
 
     const vulnerabilities = [];
-    for (const baseId of allBaseIds) {
+    for (let i = 0; i < baseIds.length; i++) {
       try {
-        const vuln = await blockchain.getVulnerability(baseId);
-        const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = vuln;
+        // Use the BVC ID to get the vulnerability data
+        const vuln = await blockchain.getVulnerability(bvcIds[i]);
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
 
         let ipfsMetadata = null;
-        let readableId = null; // Initialize a variable for the human-readable ID
         if (ipfsCid) {
           try {
             const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`);
             ipfsMetadata = response.data;
-            // Extract the human-readable ID from metadata if available
-            readableId = ipfsMetadata.id || null;
           } catch (error) {
             logger('getAllVulnerabilities', 'warn', 'IPFS fetch failed', { cid: ipfsCid });
           }
         }
 
         vulnerabilities.push({
-          id: readableId || bvc_id, // Use the human-readable ID if available, otherwise use the blockchain ID
-          bvc_id, // Keep the blockchain-specific ID
-          baseId, // Keep the base ID for reference
+          bvc_id,
+          baseId,
           version: version.toString(),
           title,
           description,
@@ -193,7 +231,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
           metadata: ipfsMetadata
         });
       } catch (error) {
-        logger('getAllVulnerabilities', 'error', 'Skipping invalid entry', { baseId });
+        logger('getAllVulnerabilities', 'error', 'Skipping invalid entry', { baseId: baseIds[i] });
       }
     }
 
@@ -222,57 +260,62 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
       });
     }
     
-    // Use the blockchain service to get paginated vulnerabilities with metadata
-    const result = await blockchain.getPaginatedAllVulnerabilities(page, pageSize);
+    // Use the updated blockchain service to get paginated vulnerabilities
+    // This now returns BVC IDs instead of base IDs
+    const bvcIds = await blockchain.getPaginatedVulnerabilityIds(page, pageSize);
     
-    if (!result.vulnerabilities.length) {
-      return res.status(404).json({ error: 'No vulnerabilities found' });
+    if (!bvcIds || !bvcIds.length) {
+      return res.status(404).json({ error: 'No vulnerabilities found for this page' });
     }
     
     // Format the vulnerabilities with their full data and IPFS metadata
     const formattedVulnerabilities = [];
     
-    for (const item of result.vulnerabilities) {
-      // Skip entries where we couldn't get data
-      if (!item.data) continue;
-      
-      const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = item.data;
-      
-      let ipfsMetadata = null;
-      let readableId = null;
-      
-      if (ipfsCid) {
-        try {
-          const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`, 
-            { timeout: 3000 });
-          ipfsMetadata = response.data;
-          // Extract the human-readable ID from metadata if available
-          readableId = ipfsMetadata.id || null;
-        } catch (error) {
-          logger('getPaginatedAllVulnerabilities', 'warn', 'IPFS fetch failed', { 
-            cid: ipfsCid,
-            error: error.message 
-          });
+    for (const bvcId of bvcIds) {
+      try {
+        const vuln = await blockchain.getVulnerability(bvcId);
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
+        
+        let ipfsMetadata = null;
+        
+        if (ipfsCid) {
+          try {
+            const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`, 
+              { timeout: 3000 });
+            ipfsMetadata = response.data;
+          } catch (error) {
+            logger('getPaginatedAllVulnerabilities', 'warn', 'IPFS fetch failed', { 
+              cid: ipfsCid,
+              error: error.message 
+            });
+          }
         }
+        
+        formattedVulnerabilities.push({
+          bvc_id,
+          baseId,
+          version: version.toString(),
+          title,
+          description,
+          platform,
+          ipfsCid,
+          isActive,
+          metadata: ipfsMetadata
+        });
+      } catch (error) {
+        logger('getPaginatedAllVulnerabilities', 'warn', 'Skipping invalid entry', { 
+          bvcId, error: error.message 
+        });
       }
-      
-      formattedVulnerabilities.push({
-        id: readableId || bvc_id, // Use the human-readable ID if available, otherwise use the blockchain ID
-        bvc_id, // Keep the blockchain-specific ID
-        baseId: item.baseId, // Keep the base ID for reference
-        version: version.toString(),
-        title,
-        description,
-        platform,
-        ipfsCid,
-        isActive,
-        metadata: ipfsMetadata
-      });
     }
 
     // Return formatted response with pagination metadata
     res.json({
-      pagination: result.pagination,
+      pagination: {
+        page,
+        pageSize,
+        total: await blockchain.getTotalVulnerabilitiesCount()
+      },
       count: formattedVulnerabilities.length,
       vulnerabilities: formattedVulnerabilities
     });
@@ -291,145 +334,98 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
 
 // GET /vulnerabilities/getPaginatedVulnerabilityIds
 router.get('/getPaginatedVulnerabilityIds', async (req, res) => {
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
-    
-    logger('getPaginatedVulnerabilityIds', 'info', 'Request received', { page, pageSize });
-    
-    try {
-      // Validate pagination parameters
-      if (page < 1 || pageSize < 1) {
-        logger('getPaginatedVulnerabilityIds', 'error', 'Invalid pagination parameters', { page, pageSize });
-        return res.status(400).json({
-          error: 'Invalid pagination parameters',
-          details: 'Page and pageSize must be positive integers'
-        });
-      }
-      
-      // Use the blockchain service method to get paginated IDs with metadata
-      logger('getPaginatedVulnerabilityIds', 'info', 'Fetching paginated vulnerability IDs', { page, pageSize });
-      const result = await blockchain.getPaginatedVulnerabilityIds(page, pageSize);
-      logger('getPaginatedVulnerabilityIds', 'info', `Retrieved ${result.ids.length} vulnerability IDs for page ${page}`);
-      
-      // Process IDs to add text identifiers from IPFS where available
-      const formattedIds = [];
-      for (const item of result.ids) {
-        // Try to find any IPFS metadata with the original text ID
-        let textId = null;
-        if (item.ipfsCid) {
-          try {
-            const ipfsResponse = await axios.get(
-              `https://gateway.pinata.cloud/ipfs/${item.ipfsCid}`,
-              { timeout: 2000 }
-            );
-            if (ipfsResponse.data && ipfsResponse.data.id) {
-              textId = ipfsResponse.data.id;
-            }
-          } catch (ipfsError) {
-            // Continue without IPFS data
-          }
-        }
-        
-        formattedIds.push({
-          bytes32Id: item.bytes32Id,
-          textId: textId,
-          latestVersionId: item.latestVersionId
-        });
-      }
-      
-      logger('getPaginatedVulnerabilityIds', 'success', 'Successfully retrieved paginated vulnerability IDs');
-      res.json({
-        pagination: result.pagination,
-        ids: formattedIds
-      });
-      
-    } catch (error) {
-      logger('getPaginatedVulnerabilityIds', 'error', 'Error fetching paginated vulnerability IDs', {
-        error: error.message,
-        stack: error.stack
-      });
-      
-      res.status(500).json({
-        error: 'Failed to retrieve paginated vulnerability IDs',
-        details: error.message
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.pageSize) || 10;
+  
+  logger('getPaginatedVulnerabilityIds', 'info', 'Request received', { page, pageSize });
+  
+  try {
+    // Validate pagination parameters
+    if (page < 1 || pageSize < 1) {
+      logger('getPaginatedVulnerabilityIds', 'error', 'Invalid pagination parameters', { page, pageSize });
+      return res.status(400).json({
+        error: 'Invalid pagination parameters',
+        details: 'Page and pageSize must be positive integers'
       });
     }
-  });
+    
+    // Use the blockchain service method to get paginated IDs
+    logger('getPaginatedVulnerabilityIds', 'info', 'Fetching paginated vulnerability IDs', { page, pageSize });
+    const bvcIds = await blockchain.getPaginatedVulnerabilityIds(page, pageSize);
+    logger('getPaginatedVulnerabilityIds', 'info', `Retrieved ${bvcIds.length} vulnerability IDs for page ${page}`);
+    
+    // Since we now have built-in BVC IDs, we can return them directly
+    logger('getPaginatedVulnerabilityIds', 'success', 'Successfully retrieved paginated vulnerability IDs');
+    res.json({
+      pagination: {
+        page,
+        pageSize,
+        total: await blockchain.getTotalVulnerabilitiesCount()
+      },
+      bvcIds
+    });
+    
+  } catch (error) {
+    logger('getPaginatedVulnerabilityIds', 'error', 'Error fetching paginated vulnerability IDs', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      error: 'Failed to retrieve paginated vulnerability IDs',
+      details: error.message
+    });
+  }
+});
 
 // GET /vulnerabilities/getAllVulnerabilityIds
 router.get('/getAllVulnerabilityIds', async (req, res) => {
-    logger('getAllVulnerabilityIds', 'info', 'Request received');
+  logger('getAllVulnerabilityIds', 'info', 'Request received');
+  
+  try {
+    // Get all vulnerability BVC IDs using the blockchain service
+    const bvcIds = await blockchain.getAllBvcIds();
+    logger('getAllVulnerabilityIds', 'info', `Retrieved ${bvcIds.length} vulnerability IDs`);
     
-    try {
-      // Get vulnerability IDs with metadata using the blockchain service
-      const vulnIdsWithMetadata = await blockchain.getAllVulnerabilityIds();
-      logger('getAllVulnerabilityIds', 'info', `Retrieved ${vulnIdsWithMetadata.length} vulnerability IDs`);
-      
-      // Add text identifiers from IPFS where available
-      const formattedIds = [];
-      
-      for (const item of vulnIdsWithMetadata) {
-        // Try to find the text ID from IPFS metadata
-        let textId = null;
-        
-        if (item.ipfsCid) {
-          try {
-            const ipfsResponse = await axios.get(
-              `https://gateway.pinata.cloud/ipfs/${item.ipfsCid}`,
-              { timeout: 2000 }
-            );
-            
-            if (ipfsResponse.data && ipfsResponse.data.id) {
-              textId = ipfsResponse.data.id;
-            }
-          } catch (ipfsError) {
-            // Continue without IPFS data
-          }
-        }
-        
-        formattedIds.push({
-          bytes32Id: item.bytes32Id,
-          textId: textId,
-          latestVersionId: item.latestVersionId
-        });
-      }
-      
-      logger('getAllVulnerabilityIds', 'success', 'Successfully retrieved vulnerability IDs');
-      res.json({
-        count: formattedIds.length,
-        ids: formattedIds
-      });
-      
-    } catch (error) {
-      logger('getAllVulnerabilityIds', 'error', 'Error fetching vulnerability IDs', {
-        error: error.message,
-        stack: error.stack
-      });
-      
-      res.status(500).json({
-        error: 'Failed to retrieve vulnerability IDs',
-        details: error.message
-      });
-    }
-  });
+    logger('getAllVulnerabilityIds', 'success', 'Successfully retrieved vulnerability IDs');
+    res.json({
+      count: bvcIds.length,
+      bvcIds
+    });
+    
+  } catch (error) {
+    logger('getAllVulnerabilityIds', 'error', 'Error fetching vulnerability IDs', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      error: 'Failed to retrieve vulnerability IDs',
+      details: error.message
+    });
+  }
+});
 
 // GET /vulnerabilities/getVulnerabilityVersions/:id
 router.get('/getVulnerabilityVersions/:id', async (req, res) => {
   const { id } = req.params;
   
   try {
-    validateVulnerabilityId(id);
-    const baseIdBytes32 = generateBaseId(id);
+    // Get all BVC IDs for this base vulnerability
+    // Extract baseId from the BVC ID or use helper
+    const baseIdBytes32 = id.startsWith('BVC-') ? generateBaseId(id) : id;
 
-    const versionIds = await blockchain.getVulnerabilityVersions(baseIdBytes32);
+    // Call updated method that returns BVC IDs instead of version IDs
+    const bvcIds = await blockchain.getVulnerabilityVersions(baseIdBytes32);
     const versions = [];
 
-    for (let i = 0; i < versionIds.length; i++) {
+    for (const bvcId of bvcIds) {
       try {
-        const versionData = await blockchain.getVulnerabilityByVersion(baseIdBytes32, i + 1);
-        const [bvc_id, version, , title, description, ipfsCid, platform, isActive] = versionData;
+        const versionData = await blockchain.getVulnerability(bvcId);
+        const [, version, , title, description, ipfsCid, platform, isActive] = versionData;
         
         versions.push({
+          bvc_id: bvcId,
           version: version.toString(),
           title,
           description,
@@ -438,7 +434,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
           isActive
         });
       } catch (error) {
-        logger('getVulnerabilityVersions', 'error', 'Skipping invalid version', { version: i + 1 });
+        logger('getVulnerabilityVersions', 'error', 'Skipping invalid version', { bvcId });
       }
     }
 
@@ -452,49 +448,6 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
   }
 });
 
-// GET /vulnerabilities/getVulnerabilityByVersion/:id/:version
-router.get('/getVulnerabilityByVersion/:id/:version', async (req, res) => {
-  const { id, version } = req.params;
-  
-  try {
-    validateVulnerabilityId(id);
-    const versionNum = parseVersion(version);
-    const baseIdBytes32 = generateBaseId(id);
-
-    const vulnerability = await blockchain.getVulnerabilityByVersion(baseIdBytes32, versionNum);
-    const [bvc_id, vulnVersion, , title, description, ipfsCid, platform, isActive] = vulnerability;
-
-    let ipfsData = null;
-    if (ipfsCid) {
-      try {
-        const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`);
-        ipfsData = response.data;
-      } catch (error) {
-        logger('getVulnerabilityByVersion', 'warn', 'IPFS fetch failed', { cid: ipfsCid });
-      }
-    }
-
-    res.json({
-      id,
-      version: vulnVersion.toString(),
-      title,
-      description,
-      platform,
-      status: isActive ? 'active' : 'inactive',
-      ipfs: {
-        cid: ipfsCid,
-        data: ipfsData
-      }
-    });
-
-  } catch (error) {
-    if (error.message.includes('does not exist')) {
-      return res.status(404).json({ error: 'Version not found' });
-    }
-    res.status(500).json({ error: 'Failed to retrieve version' });
-  }
-});
-
 // POST /vulnerabilities/setVulnerabilityStatus
 router.post('/setVulnerabilityStatus', async (req, res) => {
   try {
@@ -503,6 +456,7 @@ router.post('/setVulnerabilityStatus', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request parameters' });
     }
 
+    // Extract baseId from BVC ID or use directly
     const baseIdBytes32 = id.startsWith('BVC-') ? generateBaseId(id) : id;
     const tx = await blockchain.setVulnerabilityStatus(baseIdBytes32, isActive);
     const receipt = await tx.wait();
