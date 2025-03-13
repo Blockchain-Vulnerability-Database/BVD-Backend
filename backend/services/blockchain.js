@@ -28,24 +28,62 @@ const getVulnerability = async (bvcId) => {
   }
 };
 
-const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, platform) => {
+/**
+ * Add a vulnerability to the registry
+ * 
+ * @param {string} baseIdBytes32 - Base ID for the vulnerability
+ * @param {string} title - Title of the vulnerability
+ * @param {string} description - Description of the vulnerability
+ * @param {string} ipfsCid - IPFS content identifier
+ * @param {string} platform - Platform code (e.g., "ETH", "SOL")
+ * @param {string} discoveryDate - Discovery date in YYYY-MM-DD or YYYY format (required)
+ * @returns {Promise<Object>} Transaction object
+ */
+const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, platform, discoveryDate) => {
   try {
+    // Validate that discoveryDate is provided and not empty
+    if (!discoveryDate) {
+      throw new Error('discoveryDate is required for vulnerability submissions');
+    }
+    
+    // Validate discoveryDate format
+    const isValid = await validateDiscoveryDate(discoveryDate);
+    if (!isValid[0]) {
+      throw new Error(`Invalid discoveryDate: ${isValid[1]}`);
+    }
+    
     const tx = await contractConfig.contract.addVulnerability(
       baseIdBytes32,
       title,
       description,
       ipfsCid,
-      platform
+      platform,
+      discoveryDate
     );
     
     logger('blockchain', 'info', 'Transaction submitted', {
       baseId: baseIdBytes32,
-      txHash: tx.hash
+      txHash: tx.hash,
+      discoveryDate: discoveryDate
     });
     
     return tx;
   } catch (error) {
     return handleContractError(error, 'addVulnerability');
+  }
+};
+
+/**
+ * Validate a discovery date string
+ * 
+ * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
+ * @returns {Promise<Array>} [isValid, errorMessage]
+ */
+const validateDiscoveryDate = async (discoveryDate) => {
+  try {
+    return await contractConfig.contract.validateDiscoveryDate(discoveryDate);
+  } catch (error) {
+    return handleContractError(error, 'validateDiscoveryDate');
   }
 };
 
@@ -217,6 +255,20 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
 };
 
 /**
+ * Extract the year from a discovery date string
+ * 
+ * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
+ * @returns {Promise<number>} The extracted year or 0 if invalid/empty
+ */
+const extractYearFromDate = async (discoveryDate) => {
+  try {
+    return await contractConfig.contract.extractYearFromDate(discoveryDate);
+  } catch (error) {
+    return handleContractError(error, 'extractYearFromDate');
+  }
+};
+
+/**
  * Gets a vulnerability's counter for a specific platform and year
  * 
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
@@ -287,6 +339,8 @@ module.exports = {
   setCounter,
   transferOwnership,
   getEventsFromReceipt,
+  extractYearFromDate,
+  validateDiscoveryDate,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };

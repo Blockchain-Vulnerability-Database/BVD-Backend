@@ -34,7 +34,7 @@ router.post('/addVulnerability', async (req, res) => {
     }
 
     // Validate required fields
-    const requiredFields = ['title', 'description', 'severity', 'platform'];
+    const requiredFields = ['title', 'description', 'severity', 'platform', 'discoveryDate'];
     const missingFields = requiredFields.filter(f => !vulnerabilityData[f]);
     if (missingFields.length > 0) {
       logger('addVulnerability', 'error', 'Missing fields', { missing: missingFields });
@@ -48,6 +48,26 @@ router.post('/addVulnerability', async (req, res) => {
       return res.status(400).json({ 
         error: 'Invalid platform format', 
         details: 'Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)' 
+      });
+    }
+
+    // Validate discoveryDate format (required)
+    const dateRegex = /^(\d{4}(-\d{2}-\d{2})?)$/;
+    if (!dateRegex.test(vulnerabilityData.discoveryDate)) {
+      logger('addVulnerability', 'error', 'Invalid discoveryDate format', { discoveryDate: vulnerabilityData.discoveryDate });
+      return res.status(400).json({
+        error: 'Invalid discoveryDate format',
+        details: 'discoveryDate must be in YYYY-MM-DD or YYYY format'
+      });
+    }
+
+    // Validate year range (1990-9999)
+    const year = parseInt(vulnerabilityData.discoveryDate.substring(0, 4));
+    if (isNaN(year) || year < 1990 || year > 9999) {
+      logger('addVulnerability', 'error', 'Invalid discoveryDate year', { year });
+      return res.status(400).json({
+        error: 'Invalid discoveryDate year',
+        details: 'Year must be between 1990 and 9999'
       });
     }
 
@@ -70,13 +90,14 @@ router.post('/addVulnerability', async (req, res) => {
         .substring(0, 64); // Ensure it's 32 bytes (64 hex chars)
     }
     
-    // Submit to blockchain
+    // Submit to blockchain with discoveryDate
     const tx = await blockchain.addVulnerability(
       baseIdBytes32,
       vulnerabilityData.title,
       vulnerabilityData.description,
       ipfsCid,
-      vulnerabilityData.platform
+      vulnerabilityData.platform,
+      vulnerabilityData.discoveryDate
     );
 
     const receipt = await tx.wait();
@@ -142,7 +163,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
     try {
       // Call the updated blockchain method that uses BVC ID string directly
       const vulnerability = await blockchain.getVulnerability(id);
-      const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vulnerability;
+      const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vulnerability;
 
       // Fetch IPFS data
       let ipfsData = null;
@@ -161,6 +182,7 @@ router.get('/getVulnerability/:id', async (req, res) => {
         title,
         description,
         platform,
+        discoveryDate,
         version: version.toString(),
         status: isActive ? 'active' : 'inactive',
         ipfs: {
@@ -207,7 +229,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
       try {
         // Use the BVC ID to get the vulnerability data
         const vuln = await blockchain.getVulnerability(bvcIds[i]);
-        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vuln;
 
         let ipfsMetadata = null;
         if (ipfsCid) {
@@ -226,6 +248,7 @@ router.get('/getAllVulnerabilities', async (req, res) => {
           title,
           description,
           platform,
+          discoveryDate,
           ipfsCid,
           isActive,
           metadata: ipfsMetadata
@@ -274,7 +297,7 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
     for (const bvcId of bvcIds) {
       try {
         const vuln = await blockchain.getVulnerability(bvcId);
-        const [bvc_id, version, baseId, title, description, ipfsCid, platform, isActive] = vuln;
+        const [bvc_id, version, baseId, title, description, ipfsCid, platform, discoveryDate, isActive] = vuln;
         
         let ipfsMetadata = null;
         
@@ -298,6 +321,7 @@ router.get('/getPaginatedAllVulnerabilities', async (req, res) => {
           title,
           description,
           platform,
+          discoveryDate,
           ipfsCid,
           isActive,
           metadata: ipfsMetadata
@@ -422,7 +446,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
     for (const bvcId of bvcIds) {
       try {
         const versionData = await blockchain.getVulnerability(bvcId);
-        const [, version, , title, description, ipfsCid, platform, isActive] = versionData;
+        const [, version, , title, description, ipfsCid, platform, discoveryDate, isActive] = versionData;
         
         versions.push({
           bvc_id: bvcId,
@@ -431,6 +455,7 @@ router.get('/getVulnerabilityVersions/:id', async (req, res) => {
           description,
           ipfsCid,
           platform,
+          discoveryDate,
           isActive
         });
       } catch (error) {
@@ -470,6 +495,28 @@ router.post('/setVulnerabilityStatus', async (req, res) => {
   } catch (error) {
     logger('setVulnerabilityStatus', 'error', 'Update failed', { error: error.message });
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+// GET /vulnerabilities/validateDiscoveryDate
+router.get('/validateDiscoveryDate', async (req, res) => {
+  const { date } = req.query;
+  
+  if (!date) {
+    return res.status(400).json({ error: 'Date parameter is required' });
+  }
+  
+  try {
+    const [isValid, errorMessage] = await blockchain.validateDiscoveryDate(date);
+    
+    if (isValid) {
+      return res.json({ valid: true, year: await blockchain.extractYearFromDate(date) });
+    } else {
+      return res.status(400).json({ valid: false, error: errorMessage });
+    }
+  } catch (error) {
+    logger('validateDiscoveryDate', 'error', 'Validation failed', { error: error.message });
+    return res.status(500).json({ error: 'Failed to validate discovery date' });
   }
 });
 

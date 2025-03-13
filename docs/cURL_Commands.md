@@ -1,11 +1,33 @@
 ### 1. Vulnerability Submission
-**Add New Vulnerability**
+**Add New Vulnerability (with mandatory discoveryDate)**
 ```bash
 curl -X POST http://localhost:3000/vulnerabilities/addVulnerability \
   -H "Content-Type: application/json" \
   -d '{
     "filePath": "./vulnerability.json"
   }'
+```
+
+**Example vulnerability.json with discoveryDate**
+```json
+{
+  "title": "Test Vulnerability",
+  "description": "A vulnerability description",
+  "severity": "critical",
+  "platform": "ETH",
+  "discoveryDate": "2023-05-15"
+}
+```
+
+**Example with year-only discoveryDate**
+```json
+{
+  "title": "Test Vulnerability",
+  "description": "A vulnerability description",
+  "severity": "critical",
+  "platform": "ETH",
+  "discoveryDate": "2023"
+}
 ```
 
 ### 2. Vulnerability Retrieval
@@ -51,6 +73,17 @@ curl -X POST http://localhost:3000/vulnerabilities/setVulnerabilityStatus \
   }'
 ```
 
+### 5. Validation
+**Validate Discovery Date**
+```bash
+curl "http://localhost:3000/vulnerabilities/validateDiscoveryDate?date=2023-05-15"
+```
+
+**Validate Year-Only Discovery Date**
+```bash
+curl "http://localhost:3000/vulnerabilities/validateDiscoveryDate?date=2023"
+```
+
 ### 5. Health & Monitoring
 **System Health Check**
 ```bash
@@ -74,6 +107,49 @@ curl -X POST http://localhost:3000/vulnerabilities/addVulnerability \
 
 # Expected response:
 # {"error":"filePath parameter is required"}
+```
+
+**Missing discoveryDate in Vulnerability JSON**
+```bash
+# Create vulnerability JSON without discoveryDate
+cat > /tmp/missing-date.json << EOF
+{
+  "title": "Missing Date Test",
+  "description": "This vulnerability is missing the required discoveryDate",
+  "severity": "high",
+  "platform": "ETH"
+}
+EOF
+
+# Submit and expect error
+curl -X POST http://localhost:3000/vulnerabilities/addVulnerability \
+  -H "Content-Type: application/json" \
+  -d '{"filePath": "/tmp/missing-date.json"}'
+
+# Expected response:
+# {"error":"Missing required fields","missing":["discoveryDate"]}
+```
+
+**Invalid discoveryDate Format**
+```bash
+# Create vulnerability JSON with invalid date format
+cat > /tmp/invalid-date.json << EOF
+{
+  "title": "Invalid Date Test",
+  "description": "This vulnerability has an invalid date format",
+  "severity": "medium",
+  "platform": "ETH",
+  "discoveryDate": "05/15/2023"
+}
+EOF
+
+# Submit and expect error
+curl -X POST http://localhost:3000/vulnerabilities/addVulnerability \
+  -H "Content-Type: application/json" \
+  -d '{"filePath": "/tmp/invalid-date.json"}'
+
+# Expected response:
+# {"error":"Invalid discoveryDate format","details":"discoveryDate must be in YYYY-MM-DD or YYYY format"}
 ```
 
 **Non-existent Vulnerability**

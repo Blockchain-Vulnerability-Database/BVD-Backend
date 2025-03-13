@@ -25,6 +25,7 @@ A blockchain-powered backend service for recording, tracking, and retrieving vul
       - [POST /setVulnerabilityStatus](#post-setvulnerabilitystatus)
       - [GET /getCurrentCounter](#get-getcurrentcounter)
       - [POST /setCounter](#post-setcounter)
+      - [GET /validateDiscoveryDate](#get-validatediscoverydate)
     - [Health Endpoints](#health-endpoints)
       - [GET /health](#get-health)
   - [Middleware](#middleware)
@@ -96,7 +97,9 @@ Provides blockchain interaction functionality using ethers.js.
 - `getPaginatedVulnerabilityIds(page, pageSize)`: Gets paginated BVC IDs
 - `getTotalVulnerabilitiesCount()`: Gets total number of vulnerabilities
 - `setVulnerabilityStatus(baseId, isActive)`: Sets vulnerability status
-- `addVulnerability(baseId, title, description, ipfsCid, platform)`: Adds a new vulnerability
+- `addVulnerability(baseId, title, description, ipfsCid, platform, discoveryDate)`: Adds a new vulnerability with required discovery date
+- `validateDiscoveryDate(discoveryDate)`: Validates discovery date format
+- `extractYearFromDate(discoveryDate)`: Extracts year from discovery date string
 - `getEventsFromReceipt(receipt, eventName)`: Extracts events from a transaction receipt
 - `getCurrentCounter(platform, year)`: Gets the current counter for a platform/year
 - `setCounter(platform, year, value)`: Sets counter for a platform/year (admin only)
@@ -142,6 +145,17 @@ Adds a new vulnerability record.
 }
 ```
 
+**Vulnerability JSON Format (with required discoveryDate):**
+```json
+{
+  "title": "Vulnerability Title",
+  "description": "Detailed description",
+  "severity": "high",
+  "platform": "ETH",
+  "discoveryDate": "2023-05-15"
+}
+```
+
 **Response:**
 ```json
 {
@@ -182,6 +196,7 @@ Gets vulnerability information by BVC ID.
   "title": "Vulnerability Title",
   "description": "Vulnerability Description",
   "platform": "SOL",
+  "discoveryDate": "2023-05-15", 
   "version": "1",
   "status": "active",
   "ipfs": {
@@ -212,6 +227,7 @@ Gets all vulnerabilities.
       "title": "Vulnerability Title",
       "description": "Vulnerability Description",
       "platform": "SOL",
+      "discoveryDate": "2023-05-15",
       "ipfsCid": "Qm...",
       "isActive": true,
       "metadata": {...}
@@ -244,6 +260,7 @@ Gets version history for a vulnerability.
       "description": "Initial description",
       "ipfsCid": "Qm...",
       "platform": "SOL",
+      "discoveryDate": "2023-05-15",
       "isActive": false
     },
     {
@@ -253,6 +270,7 @@ Gets version history for a vulnerability.
       "description": "Updated description",
       "ipfsCid": "Qm...",
       "platform": "SOL",
+      "discoveryDate": "2023-06-20",
       "isActive": true
     }
   ]
@@ -390,6 +408,33 @@ curl -X POST http://localhost:3000/setCounter \
   -d '{"platform": "SOL", "year": 2023, "value": 10}'
 ```
 
+#### GET /validateDiscoveryDate
+Validates a discovery date string format.
+
+**Query Parameters:**
+- `date`: The discovery date to validate (required)
+
+**Response:**
+```json
+{
+  "valid": true,
+  "year": 2023
+}
+```
+
+**Error Response:**
+```json
+{
+  "valid": false,
+  "error": "Discovery date must be in YYYY or YYYY-MM-DD format"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET "http://localhost:3000/validateDiscoveryDate?date=2023-05-15"
+```
+
 ### Health Endpoints
 
 **File:** `routes/health.js`
@@ -449,6 +494,7 @@ The application implements comprehensive error handling for:
 - Contract errors
 - IPFS upload/fetch failures
 - Network connectivity issues
+- Missing or invalid discovery date
 
 Each error response includes detailed information to help debug the issue.
 
