@@ -34,7 +34,7 @@ router.post('/addVulnerability', async (req, res) => {
     }
 
     // Validate required fields
-    const requiredFields = ['title', 'description', 'severity', 'platform'];
+    const requiredFields = ['title', 'description', 'severity', 'platform', 'discoveryDate'];
     const missingFields = requiredFields.filter(f => !vulnerabilityData[f]);
     if (missingFields.length > 0) {
       logger('addVulnerability', 'error', 'Missing fields', { missing: missingFields });
@@ -51,18 +51,24 @@ router.post('/addVulnerability', async (req, res) => {
       });
     }
 
-    // Validate discoveryDate format if provided
-    let discoveryDate = "";
-    if (vulnerabilityData.discoveryDate) {
-      const dateRegex = /^(\d{4}(-\d{2}-\d{2})?)$/;
-      if (!dateRegex.test(vulnerabilityData.discoveryDate)) {
-        logger('addVulnerability', 'error', 'Invalid discoveryDate format', { discoveryDate: vulnerabilityData.discoveryDate });
-        return res.status(400).json({
-          error: 'Invalid discoveryDate format',
-          details: 'discoveryDate must be in YYYY-MM-DD or YYYY format'
-        });
-      }
-      discoveryDate = vulnerabilityData.discoveryDate;
+    // Validate discoveryDate format (required)
+    const dateRegex = /^(\d{4}(-\d{2}-\d{2})?)$/;
+    if (!dateRegex.test(vulnerabilityData.discoveryDate)) {
+      logger('addVulnerability', 'error', 'Invalid discoveryDate format', { discoveryDate: vulnerabilityData.discoveryDate });
+      return res.status(400).json({
+        error: 'Invalid discoveryDate format',
+        details: 'discoveryDate must be in YYYY-MM-DD or YYYY format'
+      });
+    }
+
+    // Validate year range (1990-9999)
+    const year = parseInt(vulnerabilityData.discoveryDate.substring(0, 4));
+    if (isNaN(year) || year < 1990 || year > 9999) {
+      logger('addVulnerability', 'error', 'Invalid discoveryDate year', { year });
+      return res.status(400).json({
+        error: 'Invalid discoveryDate year',
+        details: 'Year must be between 1990 and 9999'
+      });
     }
 
     // Upload to IPFS
@@ -91,7 +97,7 @@ router.post('/addVulnerability', async (req, res) => {
       vulnerabilityData.description,
       ipfsCid,
       vulnerabilityData.platform,
-      discoveryDate
+      vulnerabilityData.discoveryDate
     );
 
     const receipt = await tx.wait();
@@ -489,6 +495,28 @@ router.post('/setVulnerabilityStatus', async (req, res) => {
   } catch (error) {
     logger('setVulnerabilityStatus', 'error', 'Update failed', { error: error.message });
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+// GET /vulnerabilities/validateDiscoveryDate
+router.get('/validateDiscoveryDate', async (req, res) => {
+  const { date } = req.query;
+  
+  if (!date) {
+    return res.status(400).json({ error: 'Date parameter is required' });
+  }
+  
+  try {
+    const [isValid, errorMessage] = await blockchain.validateDiscoveryDate(date);
+    
+    if (isValid) {
+      return res.json({ valid: true, year: await blockchain.extractYearFromDate(date) });
+    } else {
+      return res.status(400).json({ valid: false, error: errorMessage });
+    }
+  } catch (error) {
+    logger('validateDiscoveryDate', 'error', 'Validation failed', { error: error.message });
+    return res.status(500).json({ error: 'Failed to validate discovery date' });
   }
 });
 

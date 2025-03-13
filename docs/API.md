@@ -60,7 +60,8 @@ Add a new vulnerability to the database and smart contract. The BVC ID will be a
   "title": "Test Vulnerability",
   "description": "A sample vulnerability for testing.",
   "severity": "high",
-  "platform": "ETH"
+  "platform": "ETH",
+  "discoveryDate": "2023-05-15"
 }
 ```
 
@@ -83,11 +84,25 @@ Add a new vulnerability to the database and smart contract. The BVC ID will be a
   }
 }
 ```
-- **400 Bad Request**
+- **400 Bad Request** (Platform format)
 ```json
 {
   "error": "Invalid platform format",
   "details": "Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)"
+}
+```
+- **400 Bad Request** (Missing discovery date)
+```json
+{
+  "error": "Missing required fields",
+  "missing": ["discoveryDate"]
+}
+```
+- **400 Bad Request** (Invalid discovery date)
+```json
+{
+  "error": "Invalid discoveryDate format",
+  "details": "discoveryDate must be in YYYY-MM-DD or YYYY format"
 }
 ```
 
@@ -108,6 +123,7 @@ Retrieve details for a specific vulnerability.
   "title": "Test Vulnerability",
   "description": "A sample vulnerability for testing.",
   "platform": "ETH",
+  "discoveryDate": "2023-05-15",
   "version": "1",
   "status": "active",
   "ipfs": {
@@ -171,6 +187,7 @@ Retrieve all vulnerabilities stored in the database.
       "title": "Test Vulnerability",
       "description": "A sample vulnerability for testing.",
       "platform": "ETH",
+      "discoveryDate": "2023-05-15",
       "ipfsCid": "Qm...",
       "isActive": true,
       "metadata": {...}
@@ -233,6 +250,7 @@ Retrieve all versions of a specific vulnerability.
       "description": "Initial description",
       "ipfsCid": "Qm...",
       "platform": "ETH",
+      "discoveryDate": "2023-05-15",
       "isActive": false
     },
     {
@@ -242,6 +260,7 @@ Retrieve all versions of a specific vulnerability.
       "description": "Updated description",
       "ipfsCid": "Qm...",
       "platform": "ETH",
+      "discoveryDate": "2023-06-20",
       "isActive": true
     }
   ]
@@ -332,6 +351,30 @@ Set the counter for a specific platform and year (admin only).
 
 ---
 
+### 12. **GET /validateDiscoveryDate**
+Validate a discovery date string format.
+
+#### Query Parameters
+- `date`: (string) The date to validate (e.g., `2023` or `2023-05-15`).
+
+#### Response
+- **200 OK** (Valid date)
+```json
+{
+  "valid": true,
+  "year": 2023
+}
+```
+- **400 Bad Request** (Invalid date)
+```json
+{
+  "valid": false,
+  "error": "Discovery date must be in YYYY or YYYY-MM-DD format"
+}
+```
+
+---
+
 ## HTTP Response Headers
 - `X-Request-ID`: Unique request ID for debugging.
 - `X-Content-Type-Options`: `nosniff`
@@ -366,10 +409,22 @@ All vulnerability IDs follow the format: `BVC-[PLATFORM]-[YEAR]-[ID]`
 
 - `BVC`: Fixed prefix
 - `[PLATFORM]`: 2-5 uppercase letters (e.g., ETH, SOL, MULTI)
-- `[YEAR]`: 4-digit year (e.g., 2023)
+- `[YEAR]`: 4-digit year from discovery date (e.g., 2023)
 - `[ID]`: 3-5 digit sequential number (e.g., 001, 12345)
 
 Examples:
 - `BVC-ETH-2023-001`
 - `BVC-SOL-2023-001`
 - `BVC-MULTI-2023-001`
+
+---
+
+## Discovery Date Format
+The discovery date field is mandatory for all vulnerability submissions and must follow one of these formats:
+
+- `YYYY`: Year only (e.g., `2023`)
+- `YYYY-MM-DD`: Full date (e.g., `2023-05-15`)
+
+The year portion must be between 1990 and 9999.
+
+The year from the discovery date is used in the BVC ID format.
