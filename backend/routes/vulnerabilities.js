@@ -33,8 +33,8 @@ router.post('/addVulnerability', async (req, res) => {
       return res.status(400).json({ error: 'Invalid vulnerability file', details: error.message });
     }
 
-    // Validate required fields
-    const requiredFields = ['title', 'description', 'severity', 'platform', 'discoveryDate'];
+    // Validate required fields - severity removed from required fields
+    const requiredFields = ['title', 'description', 'platform', 'discoveryDate'];
     const missingFields = requiredFields.filter(f => !vulnerabilityData[f]);
     if (missingFields.length > 0) {
       logger('addVulnerability', 'error', 'Missing fields', { missing: missingFields });
