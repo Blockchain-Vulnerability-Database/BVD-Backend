@@ -20,6 +20,43 @@ const handleContractError = (error, context = '') => {
   throw new Error(message);
 };
 
+/**
+ * Pre-generates a BVC ID based on platform and discovery date
+ * This allows getting the BVC ID before submitting to the blockchain
+ * 
+ * @param {string} platform - Platform code (e.g., "ETH", "SOL")
+ * @param {string} discoveryDate - Discovery date in YYYY-MM-DD or YYYY format
+ * @returns {Promise<string>} The pre-generated BVC ID
+ */
+const preGenerateBvcId = async (platform, discoveryDate) => {
+  try {
+    // Validate platform format and discovery date before calling contract
+    // This prevents unnecessary contract calls that would fail
+    const platformRegex = /^[A-Z]{2,5}$/;
+    if (!platformRegex.test(platform)) {
+      throw new Error('Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)');
+    }
+
+    const dateRegex = /^(\d{4}(-\d{2}-\d{2})?)$/;
+    if (!dateRegex.test(discoveryDate)) {
+      throw new Error('Discovery date must be in YYYY-MM-DD or YYYY format');
+    }
+
+    // Call the new contract method to pre-generate the BVC ID
+    const bvcId = await contractConfig.contract.preGenerateBvcId(platform, discoveryDate);
+    
+    logger('blockchain', 'info', 'BVC ID pre-generated', {
+      platform,
+      discoveryDate,
+      bvcId
+    });
+    
+    return bvcId;
+  } catch (error) {
+    return handleContractError(error, 'preGenerateBvcId');
+  }
+};
+
 const getVulnerability = async (bvcId) => {
   try {
     return await contractConfig.contract.getVulnerability(bvcId);
@@ -341,6 +378,7 @@ module.exports = {
   getEventsFromReceipt,
   extractYearFromDate,
   validateDiscoveryDate,
+  preGenerateBvcId,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };
