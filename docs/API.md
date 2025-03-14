@@ -44,8 +44,41 @@ Check the health of the server, blockchain, and IPFS connection.
 
 ---
 
-### 3. **POST /addVulnerability**
-Add a new vulnerability to the database and smart contract. The BVC ID will be auto-generated in the format `BVC-[PLATFORM]-[YEAR]-[ID]`.
+### 3. **GET /preGenerateBvcId**
+Pre-generate a BVC ID before submitting a vulnerability. This allows the client to know the BVC ID that will be assigned, which can be used for naming the IPFS file.
+
+#### Query Parameters
+- `platform`: (string) The platform code (e.g., `ETH`).
+- `discoveryDate`: (string) The discovery date (e.g., `2023` or `2023-05-15`).
+
+#### Response
+- **200 OK**
+```json
+{
+  "bvcId": "BVC-ETH-2023-001",
+  "platform": "ETH",
+  "discoveryDate": "2023-05-15"
+}
+```
+- **400 Bad Request** (Invalid platform)
+```json
+{
+  "error": "Invalid platform format",
+  "details": "Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)"
+}
+```
+- **400 Bad Request** (Invalid date)
+```json
+{
+  "error": "Invalid discoveryDate format",
+  "details": "discoveryDate must be in YYYY-MM-DD or YYYY format"
+}
+```
+
+---
+
+### 4. **POST /addVulnerability**
+Add a new vulnerability to the database and smart contract. The BVC ID will be auto-generated in the format `BVC-[PLATFORM]-[YEAR]-[ID]`. The IPFS file will be named using the same BVC ID format (e.g., `BVC-ETH-2023-001.json`).
 
 #### Request Body
 ```json
@@ -80,7 +113,8 @@ Add a new vulnerability to the database and smart contract. The BVC ID will be a
   },
   "ipfs": {
     "cid": "Qm...",
-    "url": "https://gateway.pinata.cloud/ipfs/Qm..."
+    "url": "https://gateway.pinata.cloud/ipfs/Qm...",
+    "filename": "BVC-ETH-2023-001.json"
   }
 }
 ```
@@ -108,7 +142,7 @@ Add a new vulnerability to the database and smart contract. The BVC ID will be a
 
 ---
 
-### 4. **GET /getVulnerability/:id**
+### 5. **GET /getVulnerability/:id**
 Retrieve details for a specific vulnerability.
 
 #### Path Parameters
@@ -142,7 +176,7 @@ Retrieve details for a specific vulnerability.
 
 ---
 
-### 5. **POST /setVulnerabilityStatus**
+### 6. **POST /setVulnerabilityStatus**
 Update the active status of a vulnerability.
 
 #### Request Body
@@ -171,7 +205,7 @@ Update the active status of a vulnerability.
 
 ---
 
-### 6. **GET /getAllVulnerabilities**
+### 7. **GET /getAllVulnerabilities**
 Retrieve all vulnerabilities stored in the database.
 
 #### Response
@@ -198,7 +232,7 @@ Retrieve all vulnerabilities stored in the database.
 
 ---
 
-### 7. **GET /getPaginatedVulnerabilityIds**
+### 8. **GET /getPaginatedVulnerabilityIds**
 Retrieve vulnerability IDs in a paginated format.
 
 #### Query Parameters
@@ -231,7 +265,7 @@ Retrieve vulnerability IDs in a paginated format.
 
 ---
 
-### 8. **GET /getVulnerabilityVersions/:id**
+### 9. **GET /getVulnerabilityVersions/:id**
 Retrieve all versions of a specific vulnerability.
 
 #### Path Parameters
@@ -275,7 +309,7 @@ Retrieve all versions of a specific vulnerability.
 
 ---
 
-### 9. **GET /getAllVulnerabilityIds**
+### 10. **GET /getAllVulnerabilityIds**
 Retrieve all vulnerability IDs.
 
 #### Response
@@ -293,7 +327,7 @@ Retrieve all vulnerability IDs.
 
 ---
 
-### 10. **GET /getCurrentCounter**
+### 11. **GET /getCurrentCounter**
 Get the current counter for a specific platform and year.
 
 #### Query Parameters
@@ -319,7 +353,7 @@ Get the current counter for a specific platform and year.
 
 ---
 
-### 11. **POST /setCounter**
+### 12. **POST /setCounter**
 Set the counter for a specific platform and year (admin only).
 
 #### Request Body
@@ -351,7 +385,7 @@ Set the counter for a specific platform and year (admin only).
 
 ---
 
-### 12. **GET /validateDiscoveryDate**
+### 13. **GET /validateDiscoveryDate**
 Validate a discovery date string format.
 
 #### Query Parameters
@@ -428,3 +462,19 @@ The discovery date field is mandatory for all vulnerability submissions and must
 The year portion must be between 1990 and 9999.
 
 The year from the discovery date is used in the BVC ID format.
+
+---
+
+## IPFS Filenames
+IPFS files are now named according to the BVC ID format to ensure consistency and traceability:
+
+- Filename format: `BVC-[PLATFORM]-[YEAR]-[ID].json`
+- Examples: 
+  - `BVC-ETH-2023-001.json`
+  - `BVC-SOL-2023-042.json`
+  - `BVC-MULTI-2023-100.json`
+
+This naming convention ensures that:
+1. IPFS filenames match their corresponding blockchain entries
+2. Files can be easily located and referenced
+3. Version history is preserved in the filename structure

@@ -16,6 +16,7 @@ A blockchain-powered backend service for recording, tracking, and retrieving vul
     - [Logger Service](#logger-service)
   - [API Endpoints](#api-endpoints)
     - [Vulnerability Endpoints](#vulnerability-endpoints)
+      - [GET /preGenerateBvcId](#get-pregeneratebvcid)
       - [POST /addVulnerability](#post-addvulnerability)
       - [GET /getVulnerability/:id](#get-getvulnerabilityid)
       - [GET /getAllVulnerabilities](#get-getallvulnerabilities)
@@ -34,6 +35,7 @@ A blockchain-powered backend service for recording, tracking, and retrieving vul
   - [Getting Started](#getting-started)
   - [Error Handling](#error-handling)
   - [Logging](#logging)
+  - [IPFS File Naming Convention](#ipfs-file-naming-convention)
 
 ## Overview
 
@@ -97,6 +99,7 @@ Provides blockchain interaction functionality using ethers.js.
 - `getPaginatedVulnerabilityIds(page, pageSize)`: Gets paginated BVC IDs
 - `getTotalVulnerabilitiesCount()`: Gets total number of vulnerabilities
 - `setVulnerabilityStatus(baseId, isActive)`: Sets vulnerability status
+- `preGenerateBvcId(platform, discoveryDate)`: Pre-generates a BVC ID before submission
 - `addVulnerability(baseId, title, description, ipfsCid, platform, discoveryDate)`: Adds a new vulnerability with required discovery date
 - `validateDiscoveryDate(discoveryDate)`: Validates discovery date format
 - `extractYearFromDate(discoveryDate)`: Extracts year from discovery date string
@@ -135,6 +138,35 @@ Provides consistent logging functionality.
 
 **File:** `routes/vulnerabilities.js`
 
+#### GET /preGenerateBvcId
+Pre-generates a BVC ID based on platform and discovery date before submission.
+
+**Query Parameters:**
+- `platform`: Platform code (e.g., "SOL", "ETH")
+- `discoveryDate`: Discovery date in YYYY or YYYY-MM-DD format
+
+**Response:**
+```json
+{
+  "bvcId": "BVC-ETH-2023-001",
+  "platform": "ETH",
+  "discoveryDate": "2023-05-15"
+}
+```
+
+**Error Response:**
+```json
+{
+  "error": "Failed to pre-generate BVC ID",
+  "details": "Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET "http://localhost:3000/vulnerabilities/preGenerateBvcId?platform=ETH&discoveryDate=2023-05-15"
+```
+
 #### POST /addVulnerability
 Adds a new vulnerability record.
 
@@ -170,14 +202,15 @@ Adds a new vulnerability record.
   },
   "ipfs": {
     "cid": "Qm...",
-    "url": "https://gateway.pinata.cloud/ipfs/Qm..."
+    "url": "https://gateway.pinata.cloud/ipfs/Qm...",
+    "filename": "BVC-SOL-2023-001.json"
   }
 }
 ```
 
 **cURL Example:**
 ```bash
-curl -X POST http://localhost:3000/addVulnerability \
+curl -X POST http://localhost:3000/vulnerabilities/addVulnerability \
   -H "Content-Type: application/json" \
   -d '{"filePath": "/path/to/vulnerability.json"}'
 ```
@@ -209,7 +242,7 @@ Gets vulnerability information by BVC ID.
 
 **cURL Example:**
 ```bash
-curl -X GET http://localhost:3000/getVulnerability/BVC-SOL-2023-001
+curl -X GET http://localhost:3000/vulnerabilities/getVulnerability/BVC-SOL-2023-001
 ```
 
 #### GET /getAllVulnerabilities
@@ -327,7 +360,7 @@ Gets paginated vulnerability BVC IDs.
 
 **cURL Example:**
 ```bash
-curl -X GET "http://localhost:3000/getPaginatedVulnerabilityIds?page=1&pageSize=10"
+curl -X GET "http://localhost:3000/vulnerabilities/getPaginatedVulnerabilityIds?page=1&pageSize=10"
 ```
 
 #### POST /setVulnerabilityStatus
@@ -352,7 +385,7 @@ Sets the status of a vulnerability.
 
 **cURL Example:**
 ```bash
-curl -X POST http://localhost:3000/setVulnerabilityStatus \
+curl -X POST http://localhost:3000/vulnerabilities/setVulnerabilityStatus \
   -H "Content-Type: application/json" \
   -d '{"id": "BVC-SOL-2023-001", "isActive": true}'
 ```
@@ -375,7 +408,7 @@ Gets the current counter for a platform and year.
 
 **cURL Example:**
 ```bash
-curl -X GET "http://localhost:3000/getCurrentCounter?platform=SOL&year=2023"
+curl -X GET "http://localhost:3000/vulnerabilities/getCurrentCounter?platform=SOL&year=2023"
 ```
 
 #### POST /setCounter
@@ -403,7 +436,7 @@ Sets the counter for a platform and year (admin only).
 
 **cURL Example:**
 ```bash
-curl -X POST http://localhost:3000/setCounter \
+curl -X POST http://localhost:3000/vulnerabilities/setCounter \
   -H "Content-Type: application/json" \
   -d '{"platform": "SOL", "year": 2023, "value": 10}'
 ```
@@ -432,7 +465,7 @@ Validates a discovery date string format.
 
 **cURL Example:**
 ```bash
-curl -X GET "http://localhost:3000/validateDiscoveryDate?date=2023-05-15"
+curl -X GET "http://localhost:3000/vulnerabilities/validateDiscoveryDate?date=2023-05-15"
 ```
 
 ### Health Endpoints
@@ -457,7 +490,7 @@ Checks the health of all required services.
 
 **cURL Example:**
 ```bash
-curl -X GET http://localhost:3000/health
+curl -X GET http://localhost:3000/vulnerabilities/health
 ```
 
 ## Middleware
@@ -504,3 +537,14 @@ All application events are logged with:
 - Console output for real-time monitoring
 - Daily log files in the `logs/` directory for historical records
 - Structured log entries with timestamp, route, type, message, and additional data
+
+## IPFS File Naming Convention
+
+All files uploaded to IPFS now follow a standardized naming convention:
+
+- Files are named using the BVC ID format: `BVC-[PLATFORM]-[YEAR]-[ID].json`
+- Example: `BVC-ETH-2023-001.json`, `BVC-SOL-2024-012.json`
+- This ensures consistency between blockchain records and IPFS storage
+- The BVC ID is pre-generated before IPFS upload when possible
+- Even if pre-generation fails, the system enforces the BVC ID naming format
+- In case of BVC ID mismatch, the system re-uploads with the correct filename
