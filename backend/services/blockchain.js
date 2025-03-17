@@ -118,7 +118,7 @@ const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, plat
  */
 const validateDiscoveryDate = async (discoveryDate) => {
   try {
-    return await contractConfig.contract.validateDiscoveryDate(discoveryDate);
+    return await contractConfig.contract.validateDiscoveryDateExternal(discoveryDate);
   } catch (error) {
     return handleContractError(error, 'validateDiscoveryDate');
   }
@@ -299,7 +299,7 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
  */
 const extractYearFromDate = async (discoveryDate) => {
   try {
-    return await contractConfig.contract.extractYearFromDate(discoveryDate);
+    return await contractConfig.contract.extractYearFromDateExternal(discoveryDate);
   } catch (error) {
     return handleContractError(error, 'extractYearFromDate');
   }
