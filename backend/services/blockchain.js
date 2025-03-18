@@ -23,7 +23,6 @@ const handleContractError = (error, context = '') => {
 /**
  * Pre-generates a BVC ID based on platform and discovery date
  * This allows getting the BVC ID before submitting to the blockchain
- * 
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
  * @param {string} discoveryDate - Discovery date in YYYY-MM-DD or YYYY format
  * @returns {Promise<string>} The pre-generated BVC ID
@@ -67,16 +66,28 @@ const getVulnerability = async (bvcId) => {
 
 /**
  * Add a vulnerability to the registry
- * 
  * @param {string} baseIdBytes32 - Base ID for the vulnerability
  * @param {string} title - Title of the vulnerability
  * @param {string} description - Description of the vulnerability
  * @param {string} ipfsCid - IPFS content identifier
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
- * @param {string} discoveryDate - Discovery date in YYYY-MM-DD or YYYY format (required)
+ * @param {string} discoveryDate - Discovery date in YYYY-MM-DD or YYYY format
+ * @param {Object} technicalDetails - Technical details about the vulnerability
+ * @param {Object} proofOfExploit - Optional proof of exploit
+ * @param {boolean} hasProofOfExploit - Flag indicating if proof of exploit is provided
  * @returns {Promise<Object>} Transaction object
  */
-const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, platform, discoveryDate) => {
+const addVulnerability = async (
+  baseIdBytes32, 
+  title, 
+  description, 
+  ipfsCid, 
+  platform, 
+  discoveryDate,
+  technicalDetails,
+  proofOfExploit,
+  hasProofOfExploit
+) => {
   try {
     // Validate that discoveryDate is provided and not empty
     if (!discoveryDate) {
@@ -89,13 +100,36 @@ const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, plat
       throw new Error(`Invalid discoveryDate: ${isValid[1]}`);
     }
     
+    // Create default values for new parameters if not provided
+    const defaultTechnicalDetails = {
+      severity: "Medium",
+      affectedSyntax: ["Solidity"],
+      vulnerableVersions: ["*"],
+      attackVectors: ["Unknown"],
+      affectedChains: [platform],
+      codeExamples: []
+    };
+    
+    const defaultProofOfExploit = {
+      attackVector: "Not provided",
+      stepsToReproduce: ["Not provided"],
+      exploitCode: {
+        language: "None",
+        code: "Not provided"
+      },
+      remediation: ""
+    };
+    
     const tx = await contractConfig.contract.addVulnerability(
       baseIdBytes32,
       title,
       description,
       ipfsCid,
       platform,
-      discoveryDate
+      discoveryDate,
+      technicalDetails || defaultTechnicalDetails,
+      proofOfExploit || defaultProofOfExploit,
+      hasProofOfExploit || false
     );
     
     logger('blockchain', 'info', 'Transaction submitted', {
@@ -112,7 +146,6 @@ const addVulnerability = async (baseIdBytes32, title, description, ipfsCid, plat
 
 /**
  * Validate a discovery date string
- * 
  * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
  * @returns {Promise<Array>} [isValid, errorMessage]
  */
@@ -126,7 +159,6 @@ const validateDiscoveryDate = async (discoveryDate) => {
 
 /**
  * Extract events from a transaction receipt
- * 
  * @param {Object} receipt - Transaction receipt
  * @param {string} eventName - Name of the event to look for
  * @returns {Array} Array of event objects
@@ -164,7 +196,6 @@ const getAllBaseIds = async () => {
 
 /**
  * Get all BVC IDs
- * 
  * @returns {Promise<Array>} Array of string BVC IDs
  */
 const getAllBvcIds = async () => {
@@ -200,7 +231,6 @@ const setVulnerabilityStatus = async (baseIdBytes32, isActive) => {
 
 /**
  * Get paginated BVC IDs
- * 
  * @param {number} page - Page number (1-based)
  * @param {number} pageSize - Number of items per page
  * @returns {Promise<Array>} Array of string BVC IDs
@@ -216,7 +246,6 @@ const getPaginatedVulnerabilityIds = async (page, pageSize) => {
 
 /**
  * Get total number of vulnerabilities
- * 
  * @returns {Promise<number>} Total count of vulnerabilities
  */
 const getTotalVulnerabilitiesCount = async () => {
@@ -230,7 +259,6 @@ const getTotalVulnerabilitiesCount = async () => {
 
 /**
  * Gets paginated vulnerabilities with full data
- * 
  * @param {number} page - Page number (1-based)
  * @param {number} pageSize - Number of items per page
  * @returns {Promise<Object>} Object with pagination info and full vulnerability data
@@ -293,7 +321,6 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
 
 /**
  * Extract the year from a discovery date string
- * 
  * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
  * @returns {Promise<number>} The extracted year or 0 if invalid/empty
  */
@@ -307,7 +334,6 @@ const extractYearFromDate = async (discoveryDate) => {
 
 /**
  * Gets a vulnerability's counter for a specific platform and year
- * 
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
  * @param {number} year - Year (e.g., 2023)
  * @returns {Promise<number>} Current counter value
@@ -322,7 +348,6 @@ const getCurrentCounter = async (platform, year) => {
 
 /**
  * Sets a vulnerability's counter for a specific platform and year (admin only)
- * 
  * @param {string} platform - Platform code (e.g., "ETH", "SOL")
  * @param {number} year - Year (e.g., 2023)
  * @param {number} value - New counter value
@@ -345,7 +370,6 @@ const setCounter = async (platform, year, value) => {
 
 /**
  * Transfers ownership of the contract (admin only)
- * 
  * @param {string} newOwner - Address of the new owner
  * @returns {Promise<Object>} Transaction object
  */
@@ -359,6 +383,34 @@ const transferOwnership = async (newOwner) => {
     return tx;
   } catch (error) {
     return handleContractError(error, 'transferOwnership');
+  }
+};
+
+/**
+ * Verify technical details against a hash
+ * @param {string} bvcId - The BVC ID string
+ * @param {Object} technicalDetails - The technical details to verify
+ * @returns {Promise<boolean>} True if the technical details match the stored hash
+ */
+const verifyTechnicalDetails = async (bvcId, technicalDetails) => {
+  try {
+    return await contractConfig.contract.verifyTechnicalDetails(bvcId, technicalDetails);
+  } catch (error) {
+    return handleContractError(error, 'verifyTechnicalDetails');
+  }
+};
+
+/**
+ * Verify proof of exploit against a hash
+ * @param {string} bvcId - The BVC ID string
+ * @param {Object} proofOfExploit - The proof of exploit to verify
+ * @returns {Promise<boolean>} True if the proof of exploit matches the stored hash
+ */
+const verifyProofOfExploit = async (bvcId, proofOfExploit) => {
+  try {
+    return await contractConfig.contract.verifyProofOfExploit(bvcId, proofOfExploit);
+  } catch (error) {
+    return handleContractError(error, 'verifyProofOfExploit');
   }
 };
 
@@ -379,6 +431,8 @@ module.exports = {
   extractYearFromDate,
   validateDiscoveryDate,
   preGenerateBvcId,
+  verifyTechnicalDetails,
+  verifyProofOfExploit,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };
