@@ -145,15 +145,72 @@ const addVulnerability = async (
 };
 
 /**
- * Validate a discovery date string
+ * Validate a discovery date string (JavaScript implementation)
  * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
  * @returns {Promise<Array>} [isValid, errorMessage]
  */
 const validateDiscoveryDate = async (discoveryDate) => {
   try {
-    return await contractConfig.contract.validateDiscoveryDateExternal(discoveryDate);
+    // JavaScript implementation of the validation logic
+    if (!discoveryDate) {
+      return [false, "Discovery date cannot be empty"];
+    }
+
+    // Check YYYY format
+    if (discoveryDate.length === 4) {
+      const yearRegex = /^\d{4}$/;
+      if (!yearRegex.test(discoveryDate)) {
+        return [false, "Year must contain only digits"];
+      }
+      
+      const year = parseInt(discoveryDate);
+      if (year < 1990 || year > 9999) {
+        return [false, "Year must be between 1990 and 9999"];
+      }
+      
+      return [true, ""];
+    }
+    
+    // Check YYYY-MM-DD format
+    if (discoveryDate.length === 10) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(discoveryDate)) {
+        return [false, "Discovery date must be in YYYY-MM-DD format"];
+      }
+      
+      const [yearStr, monthStr, dayStr] = discoveryDate.split('-');
+      const year = parseInt(yearStr);
+      const month = parseInt(monthStr);
+      const day = parseInt(dayStr);
+      
+      if (year < 1990 || year > 9999) {
+        return [false, "Year must be between 1990 and 9999"];
+      }
+      
+      if (month < 1 || month > 12) {
+        return [false, "Month must be between 1 and 12"];
+      }
+      
+      if (day < 1 || day > 31) {
+        return [false, "Day must be between 1 and 31"];
+      }
+      
+      // Simplified validation for month/day combinations
+      if (month === 2 && day > 29) {
+        return [false, "February has at most 29 days"];
+      }
+      
+      if ([4, 6, 9, 11].includes(month) && day > 30) {
+        return [false, "This month has at most 30 days"];
+      }
+      
+      return [true, ""];
+    }
+    
+    return [false, "Discovery date must be in YYYY or YYYY-MM-DD format"];
   } catch (error) {
-    return handleContractError(error, 'validateDiscoveryDate');
+    logger('blockchain', 'error', 'Date validation error', { error: error.message });
+    return [false, error.message];
   }
 };
 
@@ -320,15 +377,32 @@ const getPaginatedAllVulnerabilities = async (page, pageSize) => {
 };
 
 /**
- * Extract the year from a discovery date string
+ * Extract the year from a discovery date string (JavaScript implementation)
  * @param {string} discoveryDate - Date string in format YYYY-MM-DD or YYYY
  * @returns {Promise<number>} The extracted year or 0 if invalid/empty
  */
 const extractYearFromDate = async (discoveryDate) => {
   try {
-    return await contractConfig.contract.extractYearFromDateExternal(discoveryDate);
+    // JavaScript implementation to replace contract call
+    if (!discoveryDate) {
+      return 0;
+    }
+    
+    // For YYYY format
+    if (discoveryDate.length === 4 && /^\d{4}$/.test(discoveryDate)) {
+      return parseInt(discoveryDate);
+    }
+    
+    // For YYYY-MM-DD format
+    if (discoveryDate.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(discoveryDate)) {
+      return parseInt(discoveryDate.substring(0, 4));
+    }
+    
+    // Invalid format
+    return 0;
   } catch (error) {
-    return handleContractError(error, 'extractYearFromDate');
+    logger('blockchain', 'error', 'Year extraction error', { error: error.message });
+    return 0;
   }
 };
 
