@@ -584,6 +584,104 @@ router.get('/getPaginatedVulnerabilityIds', async (req, res) => {
   }
 });
 
+// GET /vulnerabilities/getAllVulnerabilitiesByPlatform
+router.get('/getAllVulnerabilitiesByPlatform', async (req, res) => {
+  const { platform } = req.query;
+  
+  logger('getAllVulnerabilitiesByPlatform', 'info', 'Request received', { platform });
+  
+  try {
+    // Validate platform format (2-5 uppercase letters)
+    const platformRegex = /^[A-Z]{2,5}$/;
+    if (!platformRegex.test(platform)) {
+      logger('getAllVulnerabilitiesByPlatform', 'error', 'Invalid platform format', { platform });
+      return res.status(400).json({ 
+        error: 'Invalid platform format', 
+        details: 'Platform must be 2-5 uppercase letters (e.g., ETH, SOL, MULTI)' 
+      });
+    }
+    
+    // Get all vulnerabilities for the specified platform
+    const bvcIds = await blockchain.getAllVulnerabilitiesByPlatform(platform);
+    
+    // Format the vulnerabilities with their full data
+    const vulnerabilities = [];
+    
+    for (const bvcId of bvcIds) {
+      try {
+        const vuln = await blockchain.getVulnerability(bvcId);
+        
+        // Handle the return values - 11 items
+        const [
+          bvc_id, 
+          version, 
+          baseId, 
+          titleHash, 
+          descriptionHash, 
+          ipfsCid, 
+          platform, 
+          discoveryDate, 
+          technicalDetailsHash, 
+          proofOfExploitHash, 
+          isActive
+        ] = vuln;
+        
+        let ipfsMetadata = null;
+        
+        if (ipfsCid) {
+          try {
+            const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsCid}`, 
+              { timeout: 3000 });
+            ipfsMetadata = response.data;
+          } catch (error) {
+            logger('getAllVulnerabilitiesByPlatform', 'warn', 'IPFS fetch failed', { 
+              cid: ipfsCid,
+              error: error.message 
+            });
+          }
+        }
+        
+        vulnerabilities.push({
+          bvc_id,
+          baseId,
+          version: version.toString(),
+          titleHash,
+          descriptionHash,
+          platform,
+          discoveryDate,
+          ipfsCid,
+          technicalDetailsHash,
+          proofOfExploitHash,
+          isActive,
+          metadata: ipfsMetadata
+        });
+      } catch (error) {
+        logger('getAllVulnerabilitiesByPlatform', 'warn', 'Skipping invalid entry', { 
+          bvcId, error: error.message 
+        });
+      }
+    }
+    
+    logger('getAllVulnerabilitiesByPlatform', 'success', 'Successfully retrieved platform vulnerabilities');
+    res.json({
+      platform,
+      count: vulnerabilities.length,
+      vulnerabilities
+    });
+    
+  } catch (error) {
+    logger('getAllVulnerabilitiesByPlatform', 'error', 'Error fetching platform vulnerabilities', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      error: 'Failed to retrieve platform vulnerabilities',
+      details: error.message
+    });
+  }
+});
+
 // GET /vulnerabilities/getAllVulnerabilityIds
 router.get('/getAllVulnerabilityIds', async (req, res) => {
   logger('getAllVulnerabilityIds', 'info', 'Request received');

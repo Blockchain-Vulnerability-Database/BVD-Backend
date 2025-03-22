@@ -264,6 +264,19 @@ const getAllBvcIds = async () => {
   }
 };
 
+/**
+ * Get all vulnerabilities for a specific platform
+ * @param {string} platform - Platform code (e.g., "ETH", "SOL")
+ * @returns {Promise<Array>} Array of string BVC IDs for the specified platform
+ */
+const getAllVulnerabilitiesByPlatform = async (platform) => {
+  try {
+    return await contractConfig.contract.getAllVulnerabilitiesByPlatform(platform);
+  } catch (error) {
+    return handleContractError(error, 'getAllVulnerabilitiesByPlatform');
+  }
+};
+
 const getVulnerabilityVersions = async (baseIdBytes32) => {
   try {
     // The updated contract returns string BVC IDs for each version
@@ -507,6 +520,7 @@ module.exports = {
   preGenerateBvcId,
   verifyTechnicalDetails,
   verifyProofOfExploit,
+  getAllVulnerabilitiesByPlatform,
   contractInstance: contractConfig.contract,
   provider: contractConfig.provider
 };
